@@ -57,6 +57,12 @@ window.reelix-bubble.background {
     padding: 4px 8px;
     border-radius: 9999px;
 }
+.reelix-countdown {
+    font-size: 64px;
+    font-weight: 800;
+    color: white;
+    text-shadow: 0 0 12px rgba(0, 0, 0, 0.8);
+}
 .reelix-rec-dot {
     color: #ff5f5f;
 }
@@ -77,6 +83,8 @@ pub struct CameraBubble {
     picture: gtk::Picture,
     controls: gtk::Revealer,
     timer: gtk::Label,
+    pause: gtk::Button,
+    countdown: gtk::Label,
     pipeline: RefCell<Option<(gst::Pipeline, gst::bus::BusWatchGuard)>>,
     access: RefCell<Option<CameraAccess>>,
     recording: Cell<bool>,
@@ -86,11 +94,12 @@ pub struct CameraBubble {
 }
 
 impl CameraBubble {
-    /// `on_stop` is called by the bubble's stop button; `on_closed` when the
-    /// user closes the bubble window itself.
+    /// `on_stop` / `on_pause` are called by the bubble's buttons; `on_closed`
+    /// when the user closes the bubble window itself.
     pub fn new(
         app: &gtk::Application,
         on_stop: impl Fn() + 'static,
+        on_pause: impl Fn() + 'static,
         on_closed: impl Fn() + 'static,
     ) -> Rc<Self> {
         let picture = gtk::Picture::builder()
@@ -110,6 +119,12 @@ impl CameraBubble {
             .css_classes(["circular", "destructive-action"])
             .build();
         stop.connect_clicked(move |_| on_stop());
+        let pause = gtk::Button::builder()
+            .icon_name("media-playback-pause-symbolic")
+            .tooltip_text("Pausar")
+            .css_classes(["circular"])
+            .build();
+        pause.connect_clicked(move |_| on_pause());
         let bar = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .spacing(6)
@@ -122,6 +137,7 @@ impl CameraBubble {
                 .build(),
         );
         bar.append(&timer);
+        bar.append(&pause);
         bar.append(&stop);
         let controls = gtk::Revealer::builder()
             .transition_type(gtk::RevealerTransitionType::Crossfade)
@@ -136,6 +152,13 @@ impl CameraBubble {
             .css_classes(["reelix-bubble-frame"])
             .build();
         frame.add_overlay(&controls);
+        let countdown = gtk::Label::builder()
+            .css_classes(["reelix-countdown"])
+            .halign(gtk::Align::Center)
+            .valign(gtk::Align::Center)
+            .visible(false)
+            .build();
+        frame.add_overlay(&countdown);
 
         let window = gtk::Window::builder()
             .application(app)
@@ -155,6 +178,8 @@ impl CameraBubble {
             picture,
             controls,
             timer,
+            pause,
+            countdown,
             pipeline: RefCell::new(None),
             access: RefCell::new(None),
             recording: Cell::new(false),
@@ -229,6 +254,32 @@ impl CameraBubble {
         if !recording {
             self.controls.set_reveal_child(false);
             self.timer.set_label("0:00");
+        }
+    }
+
+    /// Big number over the camera before capture starts; `None` hides it.
+    pub fn set_countdown(&self, remaining: Option<u32>) {
+        match remaining {
+            Some(n) => {
+                self.countdown.set_label(&n.to_string());
+                self.countdown.set_visible(true);
+            }
+            None => self.countdown.set_visible(false),
+        }
+    }
+
+    /// Pause button shows "resume" while paused; controls stay visible so
+    /// the paused state is obvious.
+    pub fn set_paused(&self, paused: bool) {
+        let (icon, tip) = if paused {
+            ("media-playback-start-symbolic", "Reanudar")
+        } else {
+            ("media-playback-pause-symbolic", "Pausar")
+        };
+        self.pause.set_icon_name(icon);
+        self.pause.set_tooltip_text(Some(tip));
+        if paused {
+            self.controls.set_reveal_child(true);
         }
     }
 

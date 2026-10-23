@@ -269,9 +269,35 @@ impl RecordingPipeline {
         })
     }
 
+    /// Pauses capture. Live sources stop and the pipeline's running time
+    /// stops with them, so the file has no gap when recording resumes.
+    pub fn pause(&self) -> Result<()> {
+        self.set_state(gst::State::Paused, "pause")
+    }
+
+    pub fn resume(&self) -> Result<()> {
+        self.set_state(gst::State::Playing, "resume")
+    }
+
+    fn set_state(&self, state: gst::State, action: &str) -> Result<()> {
+        match self.pipeline.set_state(state) {
+            Ok(_) => {
+                tracing::info!(?state, "recording {action}d");
+                Ok(())
+            }
+            Err(_) => Err(self
+                .pending_error()
+                .unwrap_or_else(|| AppError::Pipeline(format!("failed to {action} recording")))),
+        }
+    }
+
     /// Requests a clean stop. The file is complete once
     /// [`PipelineEvent::Finalized`] is delivered.
     pub fn finish(&self) {
+        // A paused sink waits for data and would hold the EOS back.
+        if self.pipeline.current_state() == gst::State::Paused {
+            let _ = self.pipeline.set_state(gst::State::Playing);
+        }
         request_finish(&self.pipeline, &self.finishing);
     }
 

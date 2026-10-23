@@ -62,6 +62,21 @@ impl Default for VideoSettings {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+pub struct RecordingSettings {
+    /// Seconds of countdown before capture starts (0 = start immediately).
+    pub countdown_seconds: u32,
+}
+
+impl Default for RecordingSettings {
+    fn default() -> Self {
+        Self {
+            countdown_seconds: 3,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AudioSettings {
     pub microphone: bool,
     /// PipeWire `node.name` of the microphone; `None` follows the system default.
@@ -158,6 +173,14 @@ impl CameraSettings {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
+pub struct ShortcutSettings {
+    /// System-wide shortcuts through the GlobalShortcuts portal (opt-in:
+    /// enabling them shows a GNOME confirmation dialog).
+    pub global: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct StorageSettings {
     /// `None` means the default `~/Videos/<DIR_NAME>`.
     pub recording_dir: Option<PathBuf>,
@@ -166,9 +189,11 @@ pub struct StorageSettings {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Settings {
+    pub recording: RecordingSettings,
     pub video: VideoSettings,
     pub audio: AudioSettings,
     pub camera: CameraSettings,
+    pub shortcuts: ShortcutSettings,
     pub storage: StorageSettings,
 }
 
@@ -176,10 +201,13 @@ impl Settings {
     pub const MIN_FPS: u32 = 5;
     pub const MAX_FPS: u32 = 60;
     pub const MAX_VOLUME: f64 = 4.0;
+    pub const MAX_COUNTDOWN: u32 = 10;
 
     /// Clamps values a user could have hand-edited into nonsense.
     pub fn sanitized(mut self) -> Self {
         self.video.fps = self.video.fps.clamp(Self::MIN_FPS, Self::MAX_FPS);
+        self.recording.countdown_seconds =
+            self.recording.countdown_seconds.min(Self::MAX_COUNTDOWN);
         let volume = self.audio.microphone_volume;
         self.audio.microphone_volume = if volume.is_finite() {
             volume.clamp(0.0, Self::MAX_VOLUME)
@@ -369,6 +397,16 @@ mod tests {
             .map(|s| s.height_fraction())
             .collect();
         assert!(f.windows(2).all(|w| w[0] < w[1]));
+    }
+
+    #[test]
+    fn countdown_defaults_to_three_and_is_capped() {
+        assert_eq!(Settings::default().recording.countdown_seconds, 3);
+        let s: Settings = toml::from_str("[recording]\ncountdown_seconds = 99\n").expect("toml");
+        assert_eq!(
+            s.sanitized().recording.countdown_seconds,
+            Settings::MAX_COUNTDOWN
+        );
     }
 
     #[test]

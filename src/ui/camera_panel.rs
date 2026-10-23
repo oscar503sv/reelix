@@ -7,7 +7,7 @@ use adw::prelude::*;
 
 use crate::app::Controller;
 use crate::capture::camera::list_cameras;
-use crate::config::{CameraCorner, CameraShape, CameraSize, Settings};
+use crate::config::{CameraShape, CameraSize, Settings};
 
 const SIZES: [(CameraSize, &str); 3] = [
     (CameraSize::Small, "Pequeña"),
@@ -17,12 +17,6 @@ const SIZES: [(CameraSize, &str); 3] = [
 const SHAPES: [(CameraShape, &str); 2] = [
     (CameraShape::Rectangle, "Rectángulo"),
     (CameraShape::Circle, "Círculo (usa más CPU)"),
-];
-const CORNERS: [(CameraCorner, &str); 4] = [
-    (CameraCorner::BottomRight, "Abajo a la derecha"),
-    (CameraCorner::BottomLeft, "Abajo a la izquierda"),
-    (CameraCorner::TopRight, "Arriba a la derecha"),
-    (CameraCorner::TopLeft, "Arriba a la izquierda"),
 ];
 
 pub struct CameraPanel {
@@ -56,11 +50,6 @@ impl CameraPanel {
 
         let size = combo("Tamaño", &labels(&SIZES), index_of(&SIZES, settings.size));
         let shape = combo("Forma", &labels(&SHAPES), index_of(&SHAPES, settings.shape));
-        let corner = combo(
-            "Posición",
-            &labels(&CORNERS),
-            index_of(&CORNERS, settings.corner),
-        );
         let mirror = adw::SwitchRow::builder()
             .title("Efecto espejo")
             .active(settings.mirror)
@@ -70,7 +59,6 @@ impl CameraPanel {
             device.clone().upcast::<gtk::Widget>(),
             size.clone().upcast(),
             shape.clone().upcast(),
-            corner.clone().upcast(),
             mirror.clone().upcast(),
         ];
         let group = adw::PreferencesGroup::builder()
@@ -113,9 +101,6 @@ impl CameraPanel {
         });
         bind_choice(controller, &on_change, &shape, &SHAPES, |s, v| {
             s.camera.shape = v
-        });
-        bind_choice(controller, &on_change, &corner, &CORNERS, |s, v| {
-            s.camera.corner = v
         });
         {
             let controller = Rc::clone(controller);

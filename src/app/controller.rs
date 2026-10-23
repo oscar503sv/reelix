@@ -26,6 +26,10 @@ use crate::storage::{Library, RecordingMetadata, naming};
 /// MP4 stays playable thanks to mp4mux's periodically updated index.
 const FINALIZE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Pause between hiding the countdown and starting capture: a few frames at
+/// 60 Hz, enough for GNOME to repaint the bubble without the number.
+const COUNTDOWN_CLEAR_DELAY: Duration = Duration::from_millis(150);
+
 /// Callbacks into the UI.
 pub trait ControllerObserver {
     fn state_changed(&self, state: &RecorderState);
@@ -35,6 +39,9 @@ pub trait ControllerObserver {
     fn notice(&self, _message: &str) {}
     /// Microphone loudness, 0.0–1.0.
     fn audio_level(&self, _level: f64) {}
+    /// Seconds left before capture starts (only during `Preparing`); 0 means
+    /// "hide the countdown now".
+    fn countdown(&self, _remaining: u32) {}
 }
 
 struct ActiveRecording {
@@ -174,6 +181,42 @@ impl Controller {
         });
     }
 
+    fn countdown(self: &Rc<Self>, generation: u64, remaining: u32) {
+        let still_ours =
+            self.generation.get() == generation && *self.state.borrow() == RecorderState::Preparing;
+        if !still_ours {
+            return;
+        }
+        if remaining == 0 {
+            // Hide the number first and give the compositor a moment to
+            // repaint, otherwise the first captured frames still show "1".
+            if let Some(observer) = self.observer() {
+                observer.countdown(0);
+            }
+            let weak = Rc::downgrade(self);
+            glib::timeout_add_local_once(COUNTDOWN_CLEAR_DELAY, move || {
+                let Some(this) = weak.upgrade() else {
+                    return;
+                };
+                let still_ours = this.generation.get() == generation
+                    && *this.state.borrow() == RecorderState::Preparing;
+                if still_ours && let Some(Err(e)) = this.with_pipeline(RecordingPipeline::start) {
+                    this.fail(e);
+                }
+            });
+            return;
+        }
+        if let Some(observer) = self.observer() {
+            observer.countdown(remaining);
+        }
+        let weak = Rc::downgrade(self);
+        glib::timeout_add_local_once(Duration::from_secs(1), move || {
+            if let Some(this) = weak.upgrade() {
+                this.countdown(generation, remaining - 1);
+            }
+        });
+    }
+
     /// Opens the camera for compositing when needed: camera enabled and
     /// either no bubble on screen or a single-window capture (which does not
     /// include the bubble). Any problem means recording without it (with a
@@ -205,13 +248,12 @@ impl Controller {
     ) {
         match self.build_pipeline(&session, camera) {
             Ok(active) => {
-                if let Err(e) = active.pipeline.start() {
-                    close_session(session);
-                    self.fail(e);
-                    return;
-                }
+                // Built first so errors surface before the countdown; capture
+                // only starts when it reaches zero, so it is never recorded.
                 *self.active.borrow_mut() = Some(active);
                 self.watch_session_closed(session, generation);
+                let seconds = self.settings.borrow().recording.countdown_seconds;
+                self.countdown(generation, seconds);
             }
             Err(e) => {
                 close_session(session);
@@ -371,6 +413,36 @@ impl Controller {
             PipelineEvent::Finalized => self.finalize(),
             PipelineEvent::Error(e) => self.fail(e),
         }
+    }
+
+    /// Pause if recording, resume if paused. Bound to Ctrl+Shift+P.
+    pub fn toggle_pause(self: &Rc<Self>) {
+        let state = self.state();
+        let (event, result) = match state {
+            RecorderState::Recording => (
+                RecorderEvent::PauseRequested,
+                self.with_pipeline(RecordingPipeline::pause),
+            ),
+            RecorderState::Paused => (
+                RecorderEvent::ResumeRequested,
+                self.with_pipeline(RecordingPipeline::resume),
+            ),
+            _ => return,
+        };
+        match result {
+            Some(Ok(())) => {
+                self.apply(event);
+            }
+            Some(Err(e)) => self.fail(e),
+            None => {}
+        }
+    }
+
+    fn with_pipeline<T>(&self, f: impl FnOnce(&RecordingPipeline) -> T) -> Option<T> {
+        self.active
+            .borrow()
+            .as_ref()
+            .map(|active| f(&active.pipeline))
     }
 
     pub fn stop(self: &Rc<Self>) {

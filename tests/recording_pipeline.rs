@@ -575,3 +575,81 @@ fn real_camera_preview() {
     let frame = first_preview_frame(source, 200);
     assert_round_bgra(&frame, 200);
 }
+
+/// Pause for 1.5 s in the middle of a recording: the file must contain only
+/// the recorded time (no gap) with audio and video still aligned, and
+/// stopping while paused must still finalize.
+#[test]
+fn pause_leaves_no_gap_and_stop_while_paused_finalizes() {
+    if !gst_ready() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let output = dir.path().join("paused.mp4");
+    let context = glib::MainContext::new();
+    let finalized = context
+        .with_thread_default(|| {
+            let video = live("videotestsrc");
+            let config = PipelineConfig {
+                video: VideoInput::Element(video),
+                audio: Some(AudioConfig {
+                    inputs: vec![audio_input(true, "sine")],
+                    encoder: AacEncoderKind::detect().expect("AAC encoder"),
+                }),
+                camera: None,
+                output: output.clone(),
+                fps: 30,
+                bits_per_pixel: 0.08,
+                encoder: EncoderKind::detect(EncoderPreference::Auto).expect("H.264 encoder"),
+            };
+            let main_loop = glib::MainLoop::new(Some(&context), false);
+            let finalized = Rc::new(RefCell::new(false));
+            let pipeline = {
+                let finalized = Rc::clone(&finalized);
+                let main_loop = main_loop.clone();
+                Rc::new(
+                    RecordingPipeline::new(&config, move |event| match event {
+                        PipelineEvent::Finalized => {
+                            *finalized.borrow_mut() = true;
+                            main_loop.quit();
+                        }
+                        PipelineEvent::Error(e) => panic!("pipeline error: {e}"),
+                        _ => {}
+                    })
+                    .expect("pipeline builds"),
+                )
+            };
+            pipeline.start().expect("start");
+            let p = Rc::clone(&pipeline);
+            let _pause = once_after(Duration::from_millis(1000), &context, move || {
+                p.pause().expect("pause")
+            });
+            let p = Rc::clone(&pipeline);
+            let _resume = once_after(Duration::from_millis(2500), &context, move || {
+                p.resume().expect("resume")
+            });
+            let p = Rc::clone(&pipeline);
+            let _pause_again = once_after(Duration::from_millis(3500), &context, move || {
+                p.pause().expect("pause again")
+            });
+            // Stop while paused.
+            let p = Rc::clone(&pipeline);
+            let _stop = once_after(Duration::from_millis(4000), &context, move || p.finish());
+            let ml = main_loop.clone();
+            let _safety = once_after(Duration::from_secs(15), &context, move || ml.quit());
+            main_loop.run();
+            pipeline.abort();
+            finalized.take()
+        })
+        .expect("acquire main context");
+
+    assert!(finalized, "stopping while paused must finalize");
+    let (video, audio) = track_durations(&output);
+    let (video, audio) = (video.expect("video"), audio.expect("audio"));
+    // Recorded 1.0 s + 1.0 s; the 1.5 s and 0.5 s pauses must not appear.
+    assert!((video - 2.0).abs() < 0.5, "video lasted {video}s");
+    assert!(
+        (video - audio).abs() < 0.3,
+        "A/V mismatch: {video}s vs {audio}s"
+    );
+}

@@ -65,6 +65,10 @@ confirmación), así que la prueba funcional es manual:
    pantalla completa y detener desde la burbuja; comprobar en el vídeo que
    no hay fondo alrededor del círculo. Si lo hay, revisar el tema GTK y
    Blur my Shell (ver README → Troubleshooting).
+8. Fase 4: cuenta atrás (el número no debe salir en el vídeo), pausar y
+   reanudar (sin hueco: duración del archivo = tiempo grabado), biblioteca
+   (renombrar, detalles, carpeta, papelera), preferencias, y atajos globales
+   desde Preferencias → Atajos.
 
 ## Instalación local
 

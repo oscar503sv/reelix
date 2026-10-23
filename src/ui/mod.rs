@@ -3,7 +3,10 @@
 mod audio_panel;
 mod camera_bubble;
 mod camera_panel;
+mod library;
 mod main_window;
+mod preferences;
+mod shortcuts;
 
 use std::rc::Rc;
 
@@ -14,6 +17,7 @@ use crate::app::Controller;
 use crate::branding;
 use crate::config::Settings;
 use main_window::{MainWindow, WindowObserver};
+use shortcuts::ShortcutsManager;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LaunchOptions {
@@ -43,14 +47,17 @@ fn activate(app: &adw::Application, options: LaunchOptions) {
     let controller = Controller::new(settings);
     let window = MainWindow::new(app, Rc::clone(&controller));
     controller.set_observer(Some(Rc::new(WindowObserver(Rc::clone(&window)))));
-    install_actions(app, &window, &controller);
+    let shortcuts = ShortcutsManager::new(app, window.window().upcast_ref(), &controller);
+    install_actions(app, &window, &controller, &shortcuts);
     {
         let controller = Rc::clone(&controller);
         let main = Rc::clone(&window);
+        let shortcuts_on_close = Rc::clone(&shortcuts);
         window.window().connect_close_request(move |_| {
             // Discard any in-progress recording and break the reference cycle.
             controller.cancel();
             main.close_bubble();
+            shortcuts_on_close.disable();
             controller.set_observer(None);
             glib::Propagation::Proceed
         });
@@ -58,12 +65,26 @@ fn activate(app: &adw::Application, options: LaunchOptions) {
     window.present();
     window.sync_bubble();
 
+    if controller.settings().shortcuts.global {
+        let shortcuts = Rc::clone(&shortcuts);
+        glib::spawn_future_local(async move {
+            if let Err(e) = shortcuts.enable().await {
+                tracing::warn!(error = %e, "global shortcuts unavailable at startup");
+            }
+        });
+    }
+
     if options.record_on_start {
         controller.start(Some(window.window().clone().upcast()));
     }
 }
 
-fn install_actions(app: &adw::Application, window: &Rc<MainWindow>, controller: &Rc<Controller>) {
+fn install_actions(
+    app: &adw::Application,
+    window: &Rc<MainWindow>,
+    controller: &Rc<Controller>,
+    shortcuts: &Rc<ShortcutsManager>,
+) {
     let toggle = gio::SimpleAction::new("toggle-recording", None);
     {
         let controller = Rc::clone(controller);
@@ -71,7 +92,14 @@ fn install_actions(app: &adw::Application, window: &Rc<MainWindow>, controller: 
         toggle.connect_activate(move |_, _| controller.toggle(Some(gtk_window.clone())));
     }
     app.add_action(&toggle);
-    app.set_accels_for_action("app.toggle-recording", &["<Control><Shift>r"]);
+
+    let pause = gio::SimpleAction::new("toggle-pause", None);
+    {
+        let controller = Rc::clone(controller);
+        pause.connect_activate(move |_, _| controller.toggle_pause());
+    }
+    app.add_action(&pause);
+    shortcuts::restore_app_accels(app);
 
     let cancel = gio::SimpleAction::new("cancel", None);
     {
@@ -96,6 +124,29 @@ fn install_actions(app: &adw::Application, window: &Rc<MainWindow>, controller: 
         });
     }
     app.add_action(&open_folder);
+
+    let library = gio::SimpleAction::new("library", None);
+    {
+        let window = Rc::clone(window);
+        library.connect_activate(move |_, _| window.show_library());
+    }
+    app.add_action(&library);
+
+    let prefs = gio::SimpleAction::new("preferences", None);
+    {
+        let window = Rc::clone(window);
+        let controller = Rc::clone(controller);
+        let shortcuts = Rc::clone(shortcuts);
+        prefs.connect_activate(move |_, _| {
+            let on_storage_changed: Rc<dyn Fn()> = {
+                let window = Rc::clone(&window);
+                Rc::new(move || window.refresh_recent())
+            };
+            preferences::show(window.window(), &controller, &shortcuts, on_storage_changed);
+        });
+    }
+    app.add_action(&prefs);
+    app.set_accels_for_action("app.preferences", &["<Control>comma"]);
 
     let about = gio::SimpleAction::new("about", None);
     {

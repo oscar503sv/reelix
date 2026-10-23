@@ -264,6 +264,34 @@ Lecciones de la prueba real, cada una con su test:
   menú de la ventana (Alt+Espacio). Automatizarlo requeriría una extensión de
   GNOME Shell.
 
+## UX (Fase 4)
+
+**Pausa.** `PAUSED` en un pipeline en vivo detiene las fuentes y el tiempo de
+ejecución; al volver a `PLAYING` continúa donde se quedó, así que el MP4 no
+tiene huecos y audio/vídeo siguen alineados (test con dos pausas: archivo de
+2,0 s para 2,0 s grabados). En `PAUSED` el sink espera datos y retendría el
+EOS: detener estando en pausa reanuda primero.
+
+**Cuenta atrás.** El pipeline se construye antes (los errores salen antes de
+contar) pero solo arranca al llegar a cero. El número se oculta y la captura
+espera 150 ms para que GNOME repinte la burbuja (si no, el "1" aparecía en
+los primeros frames). Ocurre dentro del estado `Preparing`; Esc lo cancela.
+
+**Biblioteca.** Filas compartidas por la lista de recientes y el diálogo
+*Mis grabaciones*. "Eliminar" mueve a la papelera (`gio::File::trash`,
+recuperable); renombrar cambia el título en el JSON y conserva el nombre del
+archivo. "Copiar" pone un `GdkFileList` en el portapapeles.
+
+**Preferencias.** `AdwPreferencesDialog`; cada cambio se guarda al momento en
+`settings.toml` y aplica a la siguiente grabación.
+
+**Atajos globales.** Portal `GlobalShortcuts`: la app propone
+`CTRL+SHIFT+r/p` y GNOME pide confirmación (opcional, desde Preferencias,
+para no mostrar un diálogo al arrancar). Las apps no-Flatpak se identifican
+antes con el portal `org.freedesktop.host.portal.Registry`. Mientras están
+activos se quitan los aceleradores internos equivalentes para no disparar
+dos veces.
+
 ## Investigación de plataforma (Fedora 44, GNOME 50, Intel Tiger Lake)
 
 | Tema | Conclusión |
@@ -275,7 +303,7 @@ Lecciones de la prueba real, cada una con su test:
 | Cámara | Implementado (Fase 3): portal `Camera` + `pipewiresrc`; ver arriba. |
 | Audio | Implementado (Fase 2) con `pulsesrc` sobre pipewire-pulse; ver arriba. `webrtcdsp` está disponible para supresión de ruido/AGC (pendiente). |
 | Ventana siempre encima | **Wayland no permite que un cliente se ponga "always on top".** Opciones: el usuario lo activa desde el menú de la ventana (Alt+Espacio), una extensión de GNOME Shell, o dibujar la burbuja de cámara dentro del vídeo (composición). Decisión para la Fase 4. |
-| Atajos globales | Portal `GlobalShortcuts` (implementado en GNOME 48+). Requiere confirmación del usuario. Fase 4. Por ahora los atajos solo funcionan con la ventana enfocada. |
+| Atajos globales | Implementado (Fase 4) con el portal `GlobalShortcuts` v1 (GNOME 48+) + `Registry` para apps del host. |
 | Flatpak | Necesitará `--socket=wayland`, `--socket=pulseaudio` (micrófono y monitor) y `--filesystem=xdg-videos/Reelix:create`; la pantalla llega por el portal sin permisos extra. Pendiente. |
 
 ## Rendimiento medido

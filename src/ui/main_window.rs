@@ -11,10 +11,11 @@ use gtk::{gio, glib};
 use super::audio_panel::AudioPanel;
 use super::camera_bubble::CameraBubble;
 use super::camera_panel::CameraPanel;
+use super::library::{LibraryActions, LibraryDialog, recording_row};
 use crate::app::{Controller, ControllerObserver, RecorderState};
 use crate::branding;
 use crate::error::AppError;
-use crate::storage::{Recording, format_duration};
+use crate::storage::format_duration;
 
 const RECENT_LIMIT: usize = 5;
 
@@ -27,6 +28,7 @@ pub struct MainWindow {
     status_description: gtk::Label,
     record_button: gtk::Button,
     stop_button: gtk::Button,
+    pause_button: gtk::Button,
     timer_label: gtk::Label,
     level_bar: gtk::LevelBar,
     audio_panel: AudioPanel,
@@ -35,6 +37,7 @@ pub struct MainWindow {
     bubble_hint_shown: Cell<bool>,
     recent_group: adw::PreferencesGroup,
     recent_rows: RefCell<Vec<adw::ActionRow>>,
+    library_dialog: Rc<LibraryDialog>,
     timer_source: RefCell<Option<glib::SourceId>>,
     inhibit_cookie: RefCell<Option<u32>>,
 }
@@ -61,6 +64,13 @@ impl MainWindow {
             .tooltip_text("Detener (Ctrl+Mayús+R)")
             .halign(gtk::Align::Center)
             .css_classes(["pill", "destructive-action"])
+            .visible(false)
+            .build();
+        let pause_button = gtk::Button::builder()
+            .label("Pausar")
+            .tooltip_text("Pausar o reanudar (Ctrl+Mayús+P)")
+            .halign(gtk::Align::Center)
+            .css_classes(["pill"])
             .visible(false)
             .build();
         let timer_label = gtk::Label::builder()
@@ -112,6 +122,7 @@ impl MainWindow {
             timer_label.upcast_ref(),
             level_bar.upcast_ref(),
             record_button.upcast_ref(),
+            pause_button.upcast_ref(),
             stop_button.upcast_ref(),
         ] {
             hero.append(widget);
@@ -127,7 +138,16 @@ impl MainWindow {
             .css_classes(["flat"])
             .action_name("app.open-folder")
             .build();
-        recent_group.set_header_suffix(Some(&open_folder));
+        let see_all = gtk::Button::builder()
+            .label("Ver todas")
+            .valign(gtk::Align::Center)
+            .css_classes(["flat"])
+            .action_name("app.library")
+            .build();
+        let header_buttons = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        header_buttons.append(&see_all);
+        header_buttons.append(&open_folder);
+        recent_group.set_header_suffix(Some(&header_buttons));
 
         let audio_panel = AudioPanel::new(&controller);
         let camera_panel = {
@@ -140,10 +160,12 @@ impl MainWindow {
         };
         let bubble = {
             let stop_controller = Rc::clone(&controller);
+            let pause_controller = Rc::clone(&controller);
             let camera_switch = camera_panel.enabled_row().clone();
             CameraBubble::new(
                 app.upcast_ref(),
                 move || stop_controller.stop(),
+                move || pause_controller.toggle_pause(),
                 // Closing the bubble window turns the camera off.
                 move || camera_switch.set_active(false),
             )
@@ -174,6 +196,8 @@ impl MainWindow {
         toasts.set_child(Some(&scrolled));
 
         let menu = gio::Menu::new();
+        menu.append(Some("Mis grabaciones"), Some("app.library"));
+        menu.append(Some("Preferencias"), Some("app.preferences"));
         menu.append(
             Some("Abrir carpeta de grabaciones"),
             Some("app.open-folder"),
@@ -215,6 +239,7 @@ impl MainWindow {
             status_description,
             record_button,
             stop_button,
+            pause_button,
             timer_label,
             level_bar,
             audio_panel,
@@ -223,6 +248,7 @@ impl MainWindow {
             bubble_hint_shown: Cell::new(false),
             recent_group,
             recent_rows: RefCell::new(Vec::new()),
+            library_dialog: LibraryDialog::new(),
             timer_source: RefCell::new(None),
             inhibit_cookie: RefCell::new(None),
         }
@@ -292,12 +318,47 @@ impl MainWindow {
                 this.controller.stop();
             }
         });
+        let weak = Rc::downgrade(self);
+        self.pause_button.connect_clicked(move |_| {
+            if let Some(this) = weak.upgrade() {
+                this.controller.toggle_pause();
+            }
+        });
     }
 
-    pub fn refresh_recent(&self) {
+    /// Row actions bound to the current library directory.
+    pub fn library_actions(self: &Rc<Self>) -> Rc<LibraryActions> {
+        let on_changed = {
+            let weak = Rc::downgrade(self);
+            Rc::new(move || {
+                if let Some(this) = weak.upgrade() {
+                    this.refresh_recent();
+                    this.library_dialog.refresh(&this.library_actions());
+                }
+            })
+        };
+        let notify = {
+            let toasts = self.toasts.clone();
+            Rc::new(move |message: &str| toasts.add_toast(adw::Toast::new(message)))
+        };
+        Rc::new(LibraryActions {
+            window: self.window.clone().upcast(),
+            library: self.controller.library(),
+            on_changed,
+            notify,
+        })
+    }
+
+    pub fn show_library(self: &Rc<Self>) {
+        self.library_dialog.refresh(&self.library_actions());
+        self.library_dialog.present(&self.window);
+    }
+
+    pub fn refresh_recent(self: &Rc<Self>) {
         for row in self.recent_rows.borrow_mut().drain(..) {
             self.recent_group.remove(&row);
         }
+        let actions = self.library_actions();
         let recordings = match self.controller.library().list() {
             Ok(list) => list,
             Err(e) => {
@@ -308,7 +369,7 @@ impl MainWindow {
         self.recent_group.set_visible(!recordings.is_empty());
         let mut rows = self.recent_rows.borrow_mut();
         for recording in recordings.into_iter().take(RECENT_LIMIT) {
-            let row = recording_row(&recording);
+            let row = recording_row(&recording, &actions);
             self.recent_group.add(&row);
             rows.push(row);
         }
@@ -368,6 +429,11 @@ impl MainWindow {
         );
         self.record_button.set_sensitive(!state.is_busy());
         self.stop_button.set_visible(capturing);
+        self.pause_button.set_visible(capturing);
+        let paused = *state == RecorderState::Paused;
+        self.pause_button
+            .set_label(if paused { "Reanudar" } else { "Pausar" });
+        self.bubble.set_paused(paused);
         self.timer_label.set_visible(capturing);
         if !capturing {
             self.level_bar.set_visible(false);
@@ -378,13 +444,19 @@ impl MainWindow {
         self.bubble.set_recording(capturing);
         // Keep the main window out of a full-screen recording; the bubble
         // carries the stop button meanwhile.
-        if *state == RecorderState::Recording && self.bubble.is_shown() {
+        if *state != RecorderState::Preparing {
+            self.bubble.set_countdown(None);
+        }
+        // With the bubble on screen (which carries the controls), minimize
+        // while the countdown runs so the window is gone when capture starts.
+        if *state == RecorderState::Preparing && self.bubble.is_shown() {
             // Wait for the portal dialog (modal to this window) to finish
             // closing: GNOME re-focuses the parent and would undo it.
             let weak = Rc::downgrade(self);
             glib::timeout_add_local_once(Duration::from_millis(600), move || {
                 if let Some(this) = weak.upgrade()
-                    && this.controller.state().is_capturing()
+                    && (this.controller.state().is_capturing()
+                        || this.controller.state() == RecorderState::Preparing)
                 {
                     tracing::debug!("minimizing main window during recording");
                     this.window.minimize();
@@ -482,6 +554,20 @@ impl ControllerObserver for WindowObserver {
         dialog.present(Some(&this.window));
     }
 
+    fn countdown(&self, remaining: u32) {
+        let this = &self.0;
+        if remaining == 0 {
+            this.bubble.set_countdown(None);
+            this.status_title.set_label("Grabando…");
+            return;
+        }
+        this.status_title.set_label(&remaining.to_string());
+        this.status_description
+            .set_label("La grabación empieza enseguida. Esc para cancelar.");
+        this.status_description.set_visible(true);
+        this.bubble.set_countdown(Some(remaining));
+    }
+
     fn notice(&self, message: &str) {
         self.0
             .toasts
@@ -495,34 +581,6 @@ impl ControllerObserver for WindowObserver {
         }
         bar.set_value(level);
     }
-}
-
-fn recording_row(recording: &Recording) -> adw::ActionRow {
-    let subtitle = recording
-        .created_at()
-        .map(|d| d.format("%d/%m/%Y %H:%M").to_string())
-        .unwrap_or_default();
-    let row = adw::ActionRow::builder()
-        .title(glib::markup_escape_text(&recording.title()))
-        .subtitle(subtitle)
-        .activatable(true)
-        .build();
-    if let Some(meta) = &recording.metadata {
-        row.add_suffix(
-            &gtk::Label::builder()
-                .label(format_duration(meta.duration))
-                .css_classes(["dim-label", "numeric"])
-                .build(),
-        );
-    }
-    row.add_suffix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
-    let file = gio::File::for_path(&recording.video_path);
-    row.connect_activated(move |row| {
-        if let Some(window) = row.root().and_downcast::<gtk::Window>() {
-            open_file(&window, &file);
-        }
-    });
-    row
 }
 
 /// Opens a file with the default application (respects Flatpak portals).

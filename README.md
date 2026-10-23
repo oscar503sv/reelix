@@ -9,9 +9,10 @@ ScreenCast de XDG, PipeWire y GStreamer.
 - Ligero: el procesamiento de vídeo lo hace GStreamer (C, multihilo); Rust
   coordina, gestiona estado y UI.
 
-> Estado: **Fase 3 completada; Fase 4 en curso** (burbuja de cámara en
-> pantalla lista). Graba pantalla o ventana con micrófono, audio del sistema
-> y cámara a MP4 (H.264 + AAC). Ver [Hoja de ruta](#hoja-de-ruta).
+> Estado: **Fase 4 (UX) completada.** Graba pantalla o ventana con
+> micrófono, audio del sistema y cámara a MP4 (H.264 + AAC), con burbuja de
+> cámara, pausa, cuenta atrás, biblioteca y preferencias. Siguiente: Fase 5
+> (optimización). Ver [Hoja de ruta](#hoja-de-ruta).
 
 ## Qué hace
 
@@ -29,7 +30,15 @@ ScreenCast de XDG, PipeWire y GStreamer.
   grabar la pantalla completa se graba tal cual se ve; al grabar una sola
   ventana, la cámara se compone dentro del vídeo en la esquina elegida.
 - Durante la grabación la ventana principal se minimiza y la burbuja muestra
-  **● REC + tiempo** y un botón **Detener** al pasar el ratón.
+  **● REC + tiempo**, **Pausar/Reanudar** y **Detener** al pasar el ratón.
+- **Pausa** sin huecos en el archivo y **cuenta atrás** configurable (no
+  aparece en el vídeo; Esc la cancela).
+- **Mis grabaciones**: reproducir, renombrar, mostrar en la carpeta, copiar
+  el archivo al portapapeles, ver detalles y mover a la papelera.
+- **Preferencias**: cuenta atrás, fps, calidad, codificador (muestra el que
+  se usa), puntero, volumen del micrófono, carpeta y atajos.
+- **Atajos globales** opcionales (portal GlobalShortcuts): funcionan sin que
+  Reelix tenga el foco.
 - Cronómetro en vivo, botón **Detener**, **Esc** cancela y descarta.
 - Detener desde el indicador "compartiendo pantalla" de GNOME también
   finaliza el archivo correctamente.
@@ -95,9 +104,15 @@ Atajos (con la ventana enfocada):
 
 | Atajo | Acción |
 |---|---|
-| Ctrl+Mayús+R | Empezar/detener grabación (con la ventana enfocada; durante la grabación usa el botón de la burbuja) |
+| Ctrl+Mayús+R | Empezar/detener grabación |
+| Ctrl+Mayús+P | Pausar/reanudar |
+| Ctrl+, | Preferencias |
 | Esc | Cancelar (descarta la grabación) |
 | Ctrl+Q | Salir |
+
+Por defecto funcionan con la ventana de Reelix enfocada. En *Preferencias →
+Atajos* puedes activar los **atajos globales**: GNOME pide confirmarlos y
+desde entonces Ctrl+Mayús+R/P funcionan en todo el sistema.
 
 Instalación local del lanzador e iconos: ver [DEVELOPMENT.md](DEVELOPMENT.md#instalación-local).
 
@@ -179,7 +194,7 @@ Detalles y decisiones en [ARCHITECTURE.md](ARCHITECTURE.md).
 - [x] **Fase 1**: GUI → portal → PipeWire → GStreamer → MP4.
 - [x] **Fase 2**: micrófono y audio del sistema (PipeWire) + AAC en el mismo MP4.
 - [x] **Fase 3**: cámara (portal Camera) + composición en el pipeline.
-- [ ] **Fase 4**: ~~burbuja/overlay con REC y detener~~ (hecho), pausa, countdown, biblioteca completa, settings, atajos globales.
+- [x] **Fase 4**: burbuja/overlay, pausa, cuenta atrás, biblioteca, preferencias, atajos globales (pendientes de verificar en uso real).
 - [ ] **Fase 5**: medición y optimización (VA-API sin copias, DMA-BUF).
 - [ ] Empaquetado RPM y Flatpak.
 
