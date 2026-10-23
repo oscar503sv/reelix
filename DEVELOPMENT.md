@@ -40,7 +40,11 @@ Tests:
   su propio `glib::MainContext` (los tests corren en paralelo). También
   compone una "cámara" verde sobre una "pantalla" roja y comprueba píxel a
   píxel posición, tamaño y máscara circular.
-- Con cámara real (no corre en CI): `cargo test -- --ignored real_camera`.
+- La cadena de vista previa de la burbuja (`build_preview_chain`) se prueba
+  con `videotestsrc` y comprueba que los frames salen redondos (esquinas con
+  alfa 0, centro opaco).
+- Con cámara real (no corre en CI): `cargo test -- --ignored real_camera`
+  (composición y vista previa).
 
 La captura vía portal no se puede automatizar (GNOME siempre pide
 confirmación), así que la prueba funcional es manual:
@@ -57,6 +61,10 @@ confirmación), así que la prueba funcional es manual:
    coincide con la imagen.
 6. Cámara: grabar con rectángulo y con círculo; comprobar posición, bordes
    y sincronía labios-voz.
+7. Burbuja: activar la cámara, arrastrarla, cambiar forma/tamaño, grabar la
+   pantalla completa y detener desde la burbuja; comprobar en el vídeo que
+   no hay fondo alrededor del círculo. Si lo hay, revisar el tema GTK y
+   Blur my Shell (ver README → Troubleshooting).
 
 ## Instalación local
 

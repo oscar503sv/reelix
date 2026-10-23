@@ -9,10 +9,9 @@ ScreenCast de XDG, PipeWire y GStreamer.
 - Ligero: el procesamiento de vídeo lo hace GStreamer (C, multihilo); Rust
   coordina, gestiona estado y UI.
 
-> Estado: **Fase 3 (cámara) completada.** Graba pantalla o ventana con
-> micrófono, audio del sistema y la cámara superpuesta a MP4 (H.264 + AAC).
-> La vista previa en vivo y la UX completa (Fase 4) están pendientes. Ver
-> [Hoja de ruta](#hoja-de-ruta).
+> Estado: **Fase 3 completada; Fase 4 en curso** (burbuja de cámara en
+> pantalla lista). Graba pantalla o ventana con micrófono, audio del sistema
+> y cámara a MP4 (H.264 + AAC). Ver [Hoja de ruta](#hoja-de-ruta).
 
 ## Qué hace
 
@@ -24,9 +23,13 @@ ScreenCast de XDG, PipeWire y GStreamer.
   que suena en los altavoces), por separado o mezclados, con medidor de nivel
   en vivo. Al mezclar, el audio del sistema se baja al 60 % para que la voz
   se entienda, y un limitador evita la saturación.
-- **Cámara** superpuesta en el vídeo: rectángulo 4:3 o círculo, tres
-  tamaños, cuatro esquinas, efecto espejo opcional. Se compone dentro del
-  archivo; todavía no se muestra en pantalla mientras grabas (Fase 4).
+- **Burbuja de cámara en pantalla**, como Loom: una ventana flotante con tu
+  cámara en vivo (círculo o rectángulo redondeado, tres tamaños, efecto
+  espejo, borde "camaleón" que cambia de color) que puedes arrastrar. Al
+  grabar la pantalla completa se graba tal cual se ve; al grabar una sola
+  ventana, la cámara se compone dentro del vídeo en la esquina elegida.
+- Durante la grabación la ventana principal se minimiza y la burbuja muestra
+  **● REC + tiempo** y un botón **Detener** al pasar el ratón.
 - Cronómetro en vivo, botón **Detener**, **Esc** cancela y descarta.
 - Detener desde el indicador "compartiendo pantalla" de GNOME también
   finaliza el archivo correctamente.
@@ -92,7 +95,7 @@ Atajos (con la ventana enfocada):
 
 | Atajo | Acción |
 |---|---|
-| Ctrl+Mayús+R | Empezar/detener grabación |
+| Ctrl+Mayús+R | Empezar/detener grabación (con la ventana enfocada; durante la grabación usa el botón de la burbuja) |
 | Esc | Cancelar (descarta la grabación) |
 | Ctrl+Q | Salir |
 
@@ -151,6 +154,8 @@ mirror = false
 | CPU alta al grabar | Estás usando codificación por software; instala `intel-media-driver` (ver arriba). |
 | Aviso "No se encontró ningún micrófono" | Revisa Configuración → Sonido → Entrada de GNOME y `wpctl status`. La grabación continúa sin micrófono. |
 | La barra de nivel no se mueve | El micrófono está silenciado o con volumen 0 en GNOME, o se eligió otro dispositivo. |
+| La burbuja tiene un cuadrado oscuro o difuminado alrededor | Lo pinta algo externo a Reelix: (1) un tema GTK con `window { background-color: … }` en `~/.config/gtk-4.0/gtk.css` (Reelix ya lo anula para la burbuja); (2) **Blur my Shell** con difuminado de aplicaciones: añade `io.github.oscar503sv.Reelix` a *Applications → Blacklist*. |
+| La burbuja no se queda encima o no sigue al cambiar de escritorio | Wayland no permite que la app lo decida: con el ratón sobre la burbuja, Alt+Espacio → «Siempre encima» y «Siempre en el área de trabajo visible». |
 | Aviso "No hay cámara disponible" | Comprueba que la cámara aparece en `wpctl status` (sección Video) y que no la usa otra app. |
 | Acceso a la cámara denegado | Configuración → Privacidad → Cámara. |
 | El audio del sistema no se graba | Necesita `pipewire-pulseaudio` (capa PulseAudio de PipeWire): `pactl info` debe responder. |
@@ -174,7 +179,7 @@ Detalles y decisiones en [ARCHITECTURE.md](ARCHITECTURE.md).
 - [x] **Fase 1**: GUI → portal → PipeWire → GStreamer → MP4.
 - [x] **Fase 2**: micrófono y audio del sistema (PipeWire) + AAC en el mismo MP4.
 - [x] **Fase 3**: cámara (portal Camera) + composición en el pipeline.
-- [ ] **Fase 4**: pausa, overlay, countdown, biblioteca completa, settings, atajos globales.
+- [ ] **Fase 4**: ~~burbuja/overlay con REC y detener~~ (hecho), pausa, countdown, biblioteca completa, settings, atajos globales.
 - [ ] **Fase 5**: medición y optimización (VA-API sin copias, DMA-BUF).
 - [ ] Empaquetado RPM y Flatpak.
 

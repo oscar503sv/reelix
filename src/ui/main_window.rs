@@ -1,14 +1,15 @@
 //! Main window: record button, live timer and audio meter, audio options,
 //! recent recordings.
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::cell::{Cell, RefCell};
+use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
 
 use super::audio_panel::AudioPanel;
+use super::camera_bubble::CameraBubble;
 use super::camera_panel::CameraPanel;
 use crate::app::{Controller, ControllerObserver, RecorderState};
 use crate::branding;
@@ -21,21 +22,34 @@ pub struct MainWindow {
     window: adw::ApplicationWindow,
     controller: Rc<Controller>,
     toasts: adw::ToastOverlay,
-    status: adw::StatusPage,
+    status_icon: gtk::Image,
+    status_title: gtk::Label,
+    status_description: gtk::Label,
     record_button: gtk::Button,
     stop_button: gtk::Button,
     timer_label: gtk::Label,
     level_bar: gtk::LevelBar,
     audio_panel: AudioPanel,
     camera_panel: CameraPanel,
+    bubble: Rc<CameraBubble>,
+    bubble_hint_shown: Cell<bool>,
     recent_group: adw::PreferencesGroup,
     recent_rows: RefCell<Vec<adw::ActionRow>>,
     timer_source: RefCell<Option<glib::SourceId>>,
     inhibit_cookie: RefCell<Option<u32>>,
 }
 
+const IDLE_DESCRIPTION: &str = "Graba tu pantalla o una ventana. Todo se guarda localmente.";
+
 impl MainWindow {
     pub fn new(app: &adw::Application, controller: Rc<Controller>) -> Rc<Self> {
+        let this = Rc::new_cyclic(|weak: &Weak<Self>| Self::build(app, controller, weak.clone()));
+        this.connect_signals();
+        this.refresh_recent();
+        this
+    }
+
+    fn build(app: &adw::Application, controller: Rc<Controller>, weak: Weak<Self>) -> Self {
         let record_button = gtk::Button::builder()
             .label("Grabar pantalla")
             .tooltip_text("Grabar pantalla (Ctrl+Mayús+R)")
@@ -67,18 +81,41 @@ impl MainWindow {
             level_bar.remove_offset_value(Some(name));
         }
 
-        let buttons = gtk::Box::new(gtk::Orientation::Vertical, 12);
-        buttons.append(&timer_label);
-        buttons.append(&level_bar);
-        buttons.append(&record_button);
-        buttons.append(&stop_button);
-
-        let status = adw::StatusPage::builder()
+        // Header: a plain box rather than AdwStatusPage, which scrolls on its
+        // own and gets squeezed when other content shares the window.
+        let status_icon = gtk::Image::builder()
             .icon_name("media-record-symbolic")
-            .title(branding::APP_NAME)
-            .description("Graba tu pantalla o una ventana. Todo se guarda localmente.")
-            .child(&buttons)
+            .pixel_size(64)
+            .css_classes(["dim-label"])
             .build();
+        let status_title = gtk::Label::builder()
+            .label(branding::APP_NAME)
+            .css_classes(["title-1"])
+            .wrap(true)
+            .justify(gtk::Justification::Center)
+            .build();
+        let status_description = gtk::Label::builder()
+            .label(IDLE_DESCRIPTION)
+            .css_classes(["dim-label"])
+            .wrap(true)
+            .justify(gtk::Justification::Center)
+            .build();
+        let hero = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(12)
+            .margin_top(24)
+            .build();
+        for widget in [
+            status_icon.upcast_ref::<gtk::Widget>(),
+            status_title.upcast_ref(),
+            status_description.upcast_ref(),
+            timer_label.upcast_ref(),
+            level_bar.upcast_ref(),
+            record_button.upcast_ref(),
+            stop_button.upcast_ref(),
+        ] {
+            hero.append(widget);
+        }
 
         let recent_group = adw::PreferencesGroup::builder()
             .title("Grabaciones recientes")
@@ -93,27 +130,45 @@ impl MainWindow {
         recent_group.set_header_suffix(Some(&open_folder));
 
         let audio_panel = AudioPanel::new(&controller);
-        let camera_panel = CameraPanel::new(&controller);
-        let groups = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        groups.append(audio_panel.widget());
-        groups.append(camera_panel.widget());
-        groups.append(&recent_group);
+        let camera_panel = {
+            let weak = weak.clone();
+            CameraPanel::new(&controller, move || {
+                if let Some(this) = weak.upgrade() {
+                    this.sync_bubble();
+                }
+            })
+        };
+        let bubble = {
+            let stop_controller = Rc::clone(&controller);
+            let camera_switch = camera_panel.enabled_row().clone();
+            CameraBubble::new(
+                app.upcast_ref(),
+                move || stop_controller.stop(),
+                // Closing the bubble window turns the camera off.
+                move || camera_switch.set_active(false),
+            )
+        };
 
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        content.append(&status);
+        let column = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(24)
+            .margin_bottom(24)
+            .build();
+        column.append(&hero);
+        column.append(audio_panel.widget());
+        column.append(camera_panel.widget());
+        column.append(&recent_group);
         let clamp = adw::Clamp::builder()
             .maximum_size(560)
             .margin_start(12)
             .margin_end(12)
-            .margin_bottom(24)
-            .child(&groups)
+            .child(&column)
             .build();
-        content.append(&clamp);
 
         let scrolled = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vexpand(true)
-            .child(&content)
+            .child(&clamp)
             .build();
         let toasts = adw::ToastOverlay::new();
         toasts.set_child(Some(&scrolled));
@@ -151,25 +206,69 @@ impl MainWindow {
             .content(&toolbar)
             .build();
 
-        let this = Rc::new(Self {
+        Self {
             window,
             controller,
             toasts,
-            status,
+            status_icon,
+            status_title,
+            status_description,
             record_button,
             stop_button,
             timer_label,
             level_bar,
             audio_panel,
             camera_panel,
+            bubble,
+            bubble_hint_shown: Cell::new(false),
             recent_group,
             recent_rows: RefCell::new(Vec::new()),
             timer_source: RefCell::new(None),
             inhibit_cookie: RefCell::new(None),
+        }
+    }
+
+    /// Shows, restyles or hides the camera bubble to match the settings.
+    pub fn sync_bubble(self: &Rc<Self>) {
+        let camera = self.controller.settings().camera;
+        if !camera.enabled {
+            self.bubble.hide();
+            self.controller.set_bubble_active(false);
+            return;
+        }
+        let this = Rc::clone(self);
+        let show = self.bubble.show(&camera);
+        glib::spawn_future_local(async move {
+            match show.await {
+                Ok(()) => {
+                    this.controller.set_bubble_active(this.bubble.is_shown());
+                    if this.bubble.is_shown() && !this.bubble_hint_shown.replace(true) {
+                        this.toasts.add_toast(
+                            adw::Toast::builder()
+                                .title("Arrastra la burbuja donde quieras. Con Alt+Espacio sobre ella: «Siempre encima» y «Siempre en el área de trabajo visible»")
+                                .timeout(10)
+                                .build(),
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "camera bubble unavailable; camera will be composited");
+                    this.bubble.hide();
+                    this.controller.set_bubble_active(false);
+                    let (title, _) = e.user_message();
+                    this.toasts.add_toast(adw::Toast::new(&format!(
+                        "{title}: sin burbuja en pantalla"
+                    )));
+                }
+            }
         });
-        this.connect_signals();
-        this.refresh_recent();
-        this
+    }
+
+    /// Releases the camera and destroys the bubble window (it would
+    /// otherwise keep the application alive).
+    pub fn close_bubble(&self) {
+        self.bubble.hide();
+        self.bubble.destroy();
     }
 
     pub fn window(&self) -> &adw::ApplicationWindow {
@@ -226,6 +325,7 @@ impl MainWindow {
                 return glib::ControlFlow::Break;
             };
             if let Some(elapsed) = this.controller.elapsed() {
+                this.bubble.set_elapsed(elapsed);
                 this.timer_label
                     .set_label(&format_duration(elapsed.as_secs_f64().floor()));
             }
@@ -275,6 +375,22 @@ impl MainWindow {
         }
         self.audio_panel.set_sensitive(!state.is_busy());
         self.camera_panel.set_sensitive(!state.is_busy());
+        self.bubble.set_recording(capturing);
+        // Keep the main window out of a full-screen recording; the bubble
+        // carries the stop button meanwhile.
+        if *state == RecorderState::Recording && self.bubble.is_shown() {
+            // Wait for the portal dialog (modal to this window) to finish
+            // closing: GNOME re-focuses the parent and would undo it.
+            let weak = Rc::downgrade(self);
+            glib::timeout_add_local_once(Duration::from_millis(600), move || {
+                if let Some(this) = weak.upgrade()
+                    && this.controller.state().is_capturing()
+                {
+                    tracing::debug!("minimizing main window during recording");
+                    this.window.minimize();
+                }
+            });
+        }
         self.set_inhibited(capturing);
 
         let (icon, title, description) = match state {
@@ -283,7 +399,7 @@ impl MainWindow {
             | RecorderState::Failed { .. } => (
                 "media-record-symbolic",
                 branding::APP_NAME.to_owned(),
-                "Graba tu pantalla o una ventana. Todo se guarda localmente.".to_owned(),
+                IDLE_DESCRIPTION.to_owned(),
             ),
             RecorderState::SelectingSource => (
                 "video-display-symbolic",
@@ -312,13 +428,10 @@ impl MainWindow {
                 "Finalizando el archivo de vídeo.".to_owned(),
             ),
         };
-        self.status.set_icon_name(Some(icon));
-        self.status.set_title(&title);
-        self.status.set_description(
-            Some(&description)
-                .filter(|d| !d.is_empty())
-                .map(String::as_str),
-        );
+        self.status_icon.set_icon_name(Some(icon));
+        self.status_title.set_label(&title);
+        self.status_description.set_label(&description);
+        self.status_description.set_visible(!description.is_empty());
 
         match state {
             RecorderState::Recording => self.start_timer(),

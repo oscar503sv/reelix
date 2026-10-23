@@ -38,6 +38,7 @@ pub struct ScreenCastSession {
     fd: OwnedFd,
     node_id: u32,
     size: Option<(i32, i32)>,
+    is_window: bool,
 }
 
 impl std::fmt::Debug for ScreenCastSession {
@@ -105,6 +106,7 @@ impl ScreenCastSession {
         let stream = streams.streams().first().ok_or(AppError::NoStream)?;
         let node_id = stream.pipe_wire_node_id();
         let size = stream.size();
+        let is_window = stream.source_type() == Some(SourceType::Window);
 
         let fd = proxy
             .open_pipe_wire_remote(&session, Default::default())
@@ -119,6 +121,7 @@ impl ScreenCastSession {
             fd,
             node_id,
             size,
+            is_window,
         })
     }
 
@@ -128,6 +131,11 @@ impl ScreenCastSession {
 
     pub fn pipewire_fd(&self) -> RawFd {
         self.fd.as_raw_fd()
+    }
+
+    /// Whether the user picked a single window (rather than a monitor).
+    pub fn is_window(&self) -> bool {
+        self.is_window
     }
 
     /// Stream size reported by the portal (may be logical pixels).

@@ -220,9 +220,49 @@ nativo y el resto de la cadena se adapta. Detectado en la prueba real: con
 elegida desconectada, se graba sin cámara (o con la predeterminada) y se
 avisa.
 
-**Pendiente (Fase 4): vista previa en pantalla.** La cámara se compone en el
-archivo; durante la grabación no se muestra. Wayland no permite que una
-ventana se ponga sola "siempre encima"; ver la sección de investigación.
+**Composición solo cuando hace falta.** Con la burbuja en pantalla (Fase 4),
+una grabación de pantalla completa ya la captura, así que no se compone (y se
+ahorra el coste del compositor). Se compone al grabar una sola ventana, que
+no incluiría la burbuja.
+
+## Burbuja de cámara (Fase 4)
+
+```
+portal Camera → pipewiresrc → raw → aspectratiocrop → [videoflip] → videoscale
+  → BGRA 2× + máscara alfa (círculo | rectángulo redondeado) → queue → gtk4paintablesink → gtk::Picture
+```
+
+Ventana GTK sin decoración, arrastrable (`gdk::Toplevel::begin_move`), con un
+borde "camaleón" animado por CSS (`@keyframes` sobre `border-color`, lo
+dibuja GTK). Al pasar el ratón durante la grabación muestra ● REC, el tiempo
+y un botón Detener. La ventana principal se minimiza 600 ms después de
+empezar (antes, GNOME la restauraba al cerrar el diálogo modal del portal).
+
+Lecciones de la prueba real, cada una con su test:
+
+- **GTK no recorta el vídeo al borde redondeado** (`overflow: hidden` no
+  aplica el radio al contenido), así que la forma se recorta en los propios
+  frames con la misma máscara alfa del compositor. En BGRA el color se
+  premultiplica: los píxeles transparentes quedan a cero sea cual sea la
+  interpretación del consumidor.
+- **`gtk4paintablesink` rellena las filas** (stride > ancho × 4): la máscara
+  se aplica fila a fila según `VideoMeta`, o deduciendo el stride del tamaño
+  del buffer.
+- **`pipewiresrc` anuncia caps ANY** y `aspectratiocrop` no enlaza desde ahí:
+  un capsfilter `video/x-raw` va primero (`build_preview_chain`, cubierto con
+  `videotestsrc` y con la cámara real).
+- **Temas de usuario.** `~/.config/gtk-4.0/gtk.css` se aplica con prioridad
+  USER, por encima de la de la app; un tema con `window { background-color }`
+  translúcido pintaba la burbuja. Su CSS se carga con prioridad USER + 1 (solo
+  afecta a la burbuja). Diagnosticado renderizando la ventana fuera de
+  pantalla y leyendo el alfa de las esquinas.
+- **Extensiones de GNOME Shell** (Blur my Shell) dibujan un rectángulo
+  difuminado detrás de cada ventana; una app no puede evitarlo: se documenta
+  cómo excluir Reelix.
+- **Wayland**: la app no puede poner la burbuja "siempre encima", en todos
+  los escritorios ni en una posición concreta; el usuario lo hace desde el
+  menú de la ventana (Alt+Espacio). Automatizarlo requeriría una extensión de
+  GNOME Shell.
 
 ## Investigación de plataforma (Fedora 44, GNOME 50, Intel Tiger Lake)
 
@@ -239,6 +279,12 @@ ventana se ponga sola "siempre encima"; ver la sección de investigación.
 | Flatpak | Necesitará `--socket=wayland`, `--socket=pulseaudio` (micrófono y monitor) y `--filesystem=xdg-videos/Reelix:create`; la pantalla llega por el portal sin permisos extra. Pendiente. |
 
 ## Rendimiento medido
+
+### Fase 4 (burbuja en pantalla, sin compositor)
+
+Grabación de pantalla completa con la burbuja visible: ≈ 90 % de un núcleo
+de media (frente a ≈ 100 % con la cámara compuesta en rectángulo y ≈ 145 % en
+círculo).
 
 ### Fase 3 (pantalla + micrófono + cámara)
 

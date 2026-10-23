@@ -125,15 +125,23 @@ impl CameraLayout {
 /// Alpha values (0–255) of an anti-aliased circle inscribed in a
 /// `size`×`size` square, row-major.
 pub fn circle_mask(size: u32) -> Vec<u8> {
-    let n = size as usize;
-    let radius = f64::from(size) / 2.0;
-    let mut mask = Vec::with_capacity(n * n);
-    for y in 0..n {
-        for x in 0..n {
-            // Distance from the pixel centre to the circle centre.
-            let dx = x as f64 + 0.5 - radius;
-            let dy = y as f64 + 0.5 - radius;
-            let distance = (dx * dx + dy * dy).sqrt();
+    rounded_rect_mask(size, size, f64::from(size) / 2.0)
+}
+
+/// Alpha values (0–255) of an anti-aliased rounded rectangle filling a
+/// `width`×`height` frame, row-major.
+pub fn rounded_rect_mask(width: u32, height: u32, radius: f64) -> Vec<u8> {
+    let (w, h) = (f64::from(width), f64::from(height));
+    let radius = radius.clamp(0.0, w.min(h) / 2.0);
+    // Half extents of the straight-edged core the corners are rounded around.
+    let (core_x, core_y) = (w / 2.0 - radius, h / 2.0 - radius);
+    let mut mask = Vec::with_capacity(width as usize * height as usize);
+    for y in 0..height {
+        for x in 0..width {
+            // Distance from the pixel centre to the core rectangle.
+            let qx = ((f64::from(x) + 0.5 - w / 2.0).abs() - core_x).max(0.0);
+            let qy = ((f64::from(y) + 0.5 - h / 2.0).abs() - core_y).max(0.0);
+            let distance = (qx * qx + qy * qy).sqrt();
             // 1 px wide smooth edge.
             let coverage = (radius - distance + 0.5).clamp(0.0, 1.0);
             mask.push((coverage * 255.0).round() as u8);
@@ -142,14 +150,110 @@ pub fn circle_mask(size: u32) -> Vec<u8> {
     mask
 }
 
-/// Writes `mask` into the alpha channel of a packed AYUV frame (A is the
-/// first byte of each pixel). Returns false if the sizes do not match.
-pub fn apply_alpha_mask(ayuv: &mut [u8], mask: &[u8]) -> bool {
-    if ayuv.len() != mask.len() * 4 {
+/// Packed 4-byte pixel layouts the mask can be applied to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlphaByte {
+    /// AYUV: alpha first, straight alpha (what `compositor` expects).
+    First,
+    /// BGRA/RGBA: alpha last. Colour is premultiplied too, so the result is
+    /// right whether the consumer reads straight or premultiplied alpha
+    /// (fully transparent pixels become all zero, never a "glow").
+    Last,
+}
+
+/// Writes `mask` into the alpha channel of a packed 4-byte-per-pixel frame.
+/// Returns false if the sizes do not match.
+pub fn apply_alpha_mask(frame: &mut [u8], mask: &[u8], alpha: AlphaByte) -> bool {
+    if frame.len() != mask.len() * 4 {
         return false;
     }
-    for (pixel, &alpha) in ayuv.chunks_exact_mut(4).zip(mask) {
-        pixel[0] = alpha;
+    match alpha {
+        AlphaByte::First => {
+            for (pixel, &value) in frame.chunks_exact_mut(4).zip(mask) {
+                pixel[0] = value;
+            }
+        }
+        AlphaByte::Last => {
+            for (pixel, &value) in frame.chunks_exact_mut(4).zip(mask) {
+                match value {
+                    255 => pixel[3] = 255,
+                    0 => pixel.fill(0),
+                    _ => {
+                        let scale = u16::from(value);
+                        for channel in &mut pixel[..3] {
+                            // Rounded (c × a) / 255; fits in u8 since a < 255.
+                            *channel = ((u16::from(*channel) * scale + 127) / 255) as u8;
+                        }
+                        pixel[3] = value;
+                    }
+                }
+            }
+        }
+    }
+    true
+}
+
+/// Memory layout of a packed 4-byte-per-pixel frame. Sinks may pad rows
+/// (e.g. gtk4paintablesink aligns them), so rows are `stride` bytes apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrameLayout {
+    pub width: usize,
+    pub height: usize,
+    /// Bytes from the start of one row to the next.
+    pub stride: usize,
+    /// Byte offset of the first row.
+    pub offset: usize,
+}
+
+impl FrameLayout {
+    pub fn contiguous(width: usize, height: usize) -> Self {
+        Self {
+            width,
+            height,
+            stride: width * 4,
+            offset: 0,
+        }
+    }
+
+    /// Layout of a buffer without video meta: rows evenly spread over the
+    /// buffer (padded rows), or contiguous if that does not divide evenly.
+    pub fn inferred(width: usize, height: usize, buffer_size: usize) -> Self {
+        match buffer_size.checked_div(height) {
+            Some(stride) if buffer_size % height == 0 && stride >= width * 4 => Self {
+                width,
+                height,
+                stride,
+                offset: 0,
+            },
+            _ => Self::contiguous(width, height),
+        }
+    }
+}
+
+/// Applies `mask` row by row, honouring the frame's stride and offset.
+/// Returns false if the layout does not fit the buffer or the mask.
+pub fn apply_alpha_mask_rows(
+    frame: &mut [u8],
+    mask: &[u8],
+    layout: FrameLayout,
+    alpha: AlphaByte,
+) -> bool {
+    let row_bytes = layout.width * 4;
+    let needed = layout
+        .height
+        .checked_sub(1)
+        .map(|last| layout.offset + last * layout.stride + row_bytes);
+    let fits = layout.stride >= row_bytes
+        && mask.len() == layout.width * layout.height
+        && needed.is_some_and(|n| n <= frame.len());
+    if !fits {
+        return false;
+    }
+    for (y, mask_row) in mask.chunks_exact(layout.width).enumerate() {
+        let start = layout.offset + y * layout.stride;
+        if !apply_alpha_mask(&mut frame[start..start + row_bytes], mask_row, alpha) {
+            return false;
+        }
     }
     true
 }
@@ -300,6 +404,81 @@ pub fn build(pipeline: &gst::Pipeline, input: &CameraInput, fps: u32) -> Result<
     })
 }
 
+/// Shape and size of the camera preview frames (the on-screen bubble).
+#[derive(Debug, Clone)]
+pub struct PreviewSpec {
+    /// Width:height the camera image is cropped to.
+    pub aspect: (u32, u32),
+    pub width: u32,
+    pub height: u32,
+    pub mirror: bool,
+    /// Alpha mask (`width`×`height`) cut into every frame.
+    pub mask: Vec<u8>,
+}
+
+/// Builds `source → raw → crop → [flip] → scale → BGRA + mask → queue → sink`
+/// inside `pipeline`. Used by the on-screen bubble; the sink is a parameter
+/// so tests can use a fakesink.
+pub fn build_preview_chain(
+    pipeline: &gst::Pipeline,
+    source: gst::Element,
+    sink: gst::Element,
+    spec: PreviewSpec,
+) -> Result<()> {
+    isolate_negotiation(&source)?;
+    let make = |factory: &str| {
+        gst::ElementFactory::make(factory)
+            .build()
+            .map_err(|_| AppError::MissingElement(factory.to_owned()))
+    };
+    // pipewiresrc advertises ANY caps (DMA-BUF included); aspectratiocrop
+    // cannot link from that, so pin system-memory raw video first.
+    let raw = make("capsfilter")?;
+    raw.set_property("caps", gst::Caps::new_empty_simple("video/x-raw"));
+    let crop = make("aspectratiocrop")?;
+    let (aw, ah) = spec.aspect;
+    crop.set_property(
+        "aspect-ratio",
+        gst::Fraction::new(
+            i32::try_from(aw).unwrap_or(1),
+            i32::try_from(ah).unwrap_or(1),
+        ),
+    );
+    let flip = make("videoflip")?;
+    flip.set_property_from_str(
+        "method",
+        if spec.mirror {
+            "horizontal-flip"
+        } else {
+            "none"
+        },
+    );
+    let scale = make("videoscale")?;
+    let convert = make("videoconvert")?;
+    let caps = make("capsfilter")?;
+    caps.set_property(
+        "caps",
+        gst::Caps::builder("video/x-raw")
+            .field("format", "BGRA")
+            .field("width", i32::try_from(spec.width).unwrap_or(400))
+            .field("height", i32::try_from(spec.height).unwrap_or(400))
+            .field("pixel-aspect-ratio", gst::Fraction::new(1, 1))
+            .build(),
+    );
+    install_alpha_mask(&caps, spec.mask, spec.width, spec.height, AlphaByte::Last)?;
+    let queue = make("queue")?;
+    queue.set_property("max-size-buffers", 2u32);
+    queue.set_property_from_str("leaky", "downstream");
+
+    let chain = [
+        &source, &raw, &crop, &flip, &scale, &convert, &caps, &queue, &sink,
+    ];
+    pipeline
+        .add_many(chain)
+        .map_err(|e| AppError::Pipeline(e.to_string()))?;
+    gst::Element::link_many(chain).map_err(|e| AppError::Pipeline(format!("camera preview: {e}")))
+}
+
 /// Places the bubble once the output size is known.
 pub fn position_bubble(pad: &gst::Pad, layout: &CameraLayout, width: u32, height: u32) {
     let rect = layout.bubble_rect(width, height);
@@ -312,25 +491,48 @@ pub fn position_bubble(pad: &gst::Pad, layout: &CameraLayout, width: u32, height
 }
 
 fn install_circle_mask(camera_caps: &gst::Element, size: u32) -> Result<()> {
-    let mask = circle_mask(size);
-    let pad = camera_caps
+    install_alpha_mask(camera_caps, circle_mask(size), size, size, AlphaByte::First)
+}
+
+/// Applies `mask` (`width`×`height`) to every frame leaving `element`
+/// (packed 4-byte pixels), using the buffer's video meta for row padding.
+pub fn install_alpha_mask(
+    element: &gst::Element,
+    mask: Vec<u8>,
+    width: u32,
+    height: u32,
+    alpha: AlphaByte,
+) -> Result<()> {
+    let (width, height) = (width as usize, height as usize);
+    let pad = element
         .static_pad("src")
-        .ok_or_else(|| AppError::Pipeline("camera capsfilter has no src pad".into()))?;
+        .ok_or_else(|| AppError::Pipeline("mask element has no src pad".into()))?;
     let warned = std::sync::atomic::AtomicBool::new(false);
     pad.add_probe(gst::PadProbeType::BUFFER, move |_, info| {
         let Some(gst::PadProbeData::Buffer(buffer)) = info.data.as_mut() else {
             return gst::PadProbeReturn::Ok;
         };
         let buffer = buffer.make_mut();
+        let layout = buffer
+            .meta::<gst_video::VideoMeta>()
+            .and_then(|meta| {
+                Some(FrameLayout {
+                    width,
+                    height,
+                    stride: usize::try_from(*meta.stride().first()?).ok()?,
+                    offset: *meta.offset().first()?,
+                })
+            })
+            .unwrap_or_else(|| FrameLayout::inferred(width, height, buffer.size()));
         let applied = buffer
             .map_writable()
-            .is_ok_and(|mut map| apply_alpha_mask(map.as_mut_slice(), &mask));
+            .is_ok_and(|mut map| apply_alpha_mask_rows(map.as_mut_slice(), &mask, layout, alpha));
         if !applied && !warned.swap(true, std::sync::atomic::Ordering::Relaxed) {
-            tracing::warn!("camera frame layout unexpected; circle mask skipped");
+            tracing::warn!("frame layout unexpected; alpha mask skipped");
         }
         gst::PadProbeReturn::Ok
     })
-    .ok_or_else(|| AppError::Pipeline("failed to install circle mask".into()))?;
+    .ok_or_else(|| AppError::Pipeline("failed to install alpha mask".into()))?;
     Ok(())
 }
 
@@ -341,7 +543,7 @@ fn install_circle_mask(camera_caps: &gst::Element, size: u32) -> Result<()> {
 /// source adapts to whatever it produces, so answer its caps query with the
 /// common raw formats only (no size or rate) and let the camera pick its own
 /// native mode. Webcams typically offer YUY2 or NV12.
-fn isolate_negotiation(source: &gst::Element) -> Result<()> {
+pub fn isolate_negotiation(source: &gst::Element) -> Result<()> {
     let pad = source
         .static_pad("src")
         .ok_or_else(|| AppError::Pipeline("camera source has no src pad".into()))?;
@@ -492,10 +694,100 @@ mod tests {
     }
 
     #[test]
-    fn alpha_mask_writes_first_byte_only() {
+    fn alpha_mask_writes_only_the_alpha_byte() {
         let mut frame = vec![9u8; 2 * 4];
-        assert!(apply_alpha_mask(&mut frame, &[0, 200]));
+        assert!(apply_alpha_mask(&mut frame, &[0, 200], AlphaByte::First));
         assert_eq!(frame, [0, 9, 9, 9, 200, 9, 9, 9]);
-        assert!(!apply_alpha_mask(&mut frame, &[0]));
+        assert!(!apply_alpha_mask(&mut frame, &[0], AlphaByte::First));
+    }
+
+    #[test]
+    fn padded_rows_are_masked_and_padding_untouched() {
+        // 2×2 frame, rows padded to 12 bytes, 4-byte leading offset.
+        let layout = FrameLayout {
+            width: 2,
+            height: 2,
+            stride: 12,
+            offset: 4,
+        };
+        let mut frame = vec![7u8; 4 + 12 * 2];
+        let mask = [0, 255, 255, 0];
+        assert!(apply_alpha_mask_rows(
+            &mut frame,
+            &mask,
+            layout,
+            AlphaByte::Last
+        ));
+        assert_eq!(&frame[0..4], &[7; 4], "offset bytes untouched");
+        assert_eq!(&frame[4..8], &[0, 0, 0, 0], "row 0, pixel 0 cleared");
+        assert_eq!(&frame[8..12], &[7, 7, 7, 255], "row 0, pixel 1 opaque");
+        assert_eq!(&frame[12..16], &[7; 4], "row 0 padding untouched");
+        assert_eq!(&frame[16..20], &[7, 7, 7, 255], "row 1, pixel 0 opaque");
+        assert_eq!(&frame[20..24], &[0, 0, 0, 0], "row 1, pixel 1 cleared");
+        assert_eq!(&frame[24..28], &[7; 4], "row 1 padding untouched");
+    }
+
+    #[test]
+    fn stride_is_inferred_from_buffer_size() {
+        assert_eq!(FrameLayout::inferred(424, 424, 1728 * 424).stride, 1728);
+        assert_eq!(FrameLayout::inferred(424, 424, 1696 * 424).stride, 1696);
+        assert_eq!(
+            FrameLayout::inferred(2, 2, 15).stride,
+            8,
+            "uneven: contiguous"
+        );
+        assert_eq!(
+            FrameLayout::inferred(2, 0, 16).stride,
+            8,
+            "no rows: contiguous"
+        );
+    }
+
+    #[test]
+    fn layout_larger_than_buffer_is_rejected() {
+        let layout = FrameLayout {
+            width: 2,
+            height: 2,
+            stride: 16,
+            offset: 0,
+        };
+        let mut frame = vec![0u8; 20];
+        assert!(!apply_alpha_mask_rows(
+            &mut frame,
+            &[0; 4],
+            layout,
+            AlphaByte::Last
+        ));
+    }
+
+    #[test]
+    fn bgra_mask_premultiplies_colour() {
+        let mut frame = vec![200u8; 3 * 4];
+        assert!(apply_alpha_mask(
+            &mut frame,
+            &[255, 0, 128],
+            AlphaByte::Last
+        ));
+        assert_eq!(&frame[0..4], &[200, 200, 200, 255], "opaque: unchanged");
+        assert_eq!(&frame[4..8], &[0, 0, 0, 0], "transparent: all zero");
+        // 200 × 128 / 255 ≈ 100.
+        assert_eq!(&frame[8..12], &[100, 100, 100, 128], "edge: premultiplied");
+    }
+
+    #[test]
+    fn rounded_rect_mask_rounds_only_the_corners() {
+        let (w, h) = (80u32, 60u32);
+        let mask = rounded_rect_mask(w, h, 10.0);
+        let at = |x: u32, y: u32| mask[(y * w + x) as usize];
+        assert_eq!(at(0, 0), 0, "corner is cut");
+        assert_eq!(at(w - 1, h - 1), 0, "corner is cut");
+        assert_eq!(at(0, h / 2), 255, "straight edge is kept");
+        assert_eq!(at(w / 2, 0), 255, "straight edge is kept");
+        assert_eq!(at(w / 2, h / 2), 255);
+    }
+
+    #[test]
+    fn circle_is_a_fully_rounded_square() {
+        assert_eq!(circle_mask(40), rounded_rect_mask(40, 40, 20.0));
     }
 }

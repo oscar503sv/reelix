@@ -56,6 +56,9 @@ pub struct Controller {
     /// user cancelled or started over while they were awaiting.
     generation: Cell<u64>,
     observer: RefCell<Option<Rc<dyn ControllerObserver>>>,
+    /// The on-screen camera bubble is showing: a full-screen recording
+    /// captures it, so the camera only needs compositing for window captures.
+    bubble_active: Cell<bool>,
 }
 
 impl Controller {
@@ -66,11 +69,16 @@ impl Controller {
             active: RefCell::new(None),
             generation: Cell::new(0),
             observer: RefCell::new(None),
+            bubble_active: Cell::new(false),
         })
     }
 
     pub fn set_observer(&self, observer: Option<Rc<dyn ControllerObserver>>) {
         *self.observer.borrow_mut() = observer;
+    }
+
+    pub fn set_bubble_active(&self, active: bool) {
+        self.bubble_active.set(active);
     }
 
     pub fn state(&self) -> RecorderState {
@@ -149,7 +157,7 @@ impl Controller {
                         session.close().await;
                         return;
                     }
-                    let camera = this.request_camera().await;
+                    let camera = this.request_camera(session.is_window()).await;
                     if this.generation.get() != generation {
                         tracing::debug!("cancelled while opening the camera; discarding");
                         session.close().await;
@@ -166,10 +174,16 @@ impl Controller {
         });
     }
 
-    /// Opens the camera if enabled. Any problem means recording without it
-    /// (with a notice), never a failed recording.
-    async fn request_camera(&self) -> Option<CameraAccess> {
+    /// Opens the camera for compositing when needed: camera enabled and
+    /// either no bubble on screen or a single-window capture (which does not
+    /// include the bubble). Any problem means recording without it (with a
+    /// notice), never a failed recording.
+    async fn request_camera(&self, window_capture: bool) -> Option<CameraAccess> {
         if !self.settings.borrow().camera.enabled {
+            return None;
+        }
+        if self.bubble_active.get() && !window_capture {
+            tracing::info!("camera bubble is on screen; the screen capture records it");
             return None;
         }
         match CameraAccess::request().await {

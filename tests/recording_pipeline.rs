@@ -11,7 +11,10 @@ use gst::glib;
 use gst::prelude::*;
 use reelix::config::EncoderPreference;
 use reelix::recording::audio::{AacEncoderKind, AudioInput, AudioSourceElement};
-use reelix::recording::camera::{CameraInput, CameraLayout, CameraSource, Corner, Shape};
+use reelix::recording::camera::{
+    CameraInput, CameraLayout, CameraSource, Corner, PreviewSpec, Shape, build_preview_chain,
+    circle_mask,
+};
 use reelix::recording::{
     AudioConfig, EncoderKind, PipelineConfig, PipelineEvent, RecordingPipeline, VideoInput,
 };
@@ -508,4 +511,67 @@ fn real_camera_composition() {
         let (video, _) = track_durations(&output);
         assert!(video.is_some_and(|d| d > 2.0), "{shape:?}: video {video:?}");
     }
+}
+
+/// Runs the bubble's preview chain with `source` and returns the first BGRA
+/// frame it produces.
+fn first_preview_frame(source: gst::Element, size: u32) -> Vec<u8> {
+    use std::sync::mpsc;
+    let pipeline = gst::Pipeline::new();
+    let sink = gst::ElementFactory::make("fakesink")
+        .property("signal-handoffs", true)
+        .build()
+        .expect("fakesink");
+    let (tx, rx) = mpsc::channel();
+    sink.connect("handoff", false, move |args| {
+        let buffer = args[1].get::<gst::Buffer>().ok()?;
+        let map = buffer.map_readable().ok()?;
+        let _ = tx.send(map.as_slice().to_vec());
+        None
+    });
+    let spec = PreviewSpec {
+        aspect: (1, 1),
+        width: size,
+        height: size,
+        mirror: true,
+        mask: circle_mask(size),
+    };
+    build_preview_chain(&pipeline, source, sink, spec).expect("preview chain links");
+    pipeline.set_state(gst::State::Playing).expect("play");
+    let frame = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("preview produced a frame");
+    let _ = pipeline.set_state(gst::State::Null);
+    frame
+}
+
+fn assert_round_bgra(frame: &[u8], size: u32) {
+    assert_eq!(frame.len(), (size * size * 4) as usize);
+    let pixel = |x: u32, y: u32| &frame[((y * size + x) * 4) as usize..][..4];
+    assert_eq!(pixel(0, 0), &[0, 0, 0, 0], "corner is fully transparent");
+    assert_eq!(pixel(size / 2, size / 2)[3], 255, "centre is opaque");
+}
+
+#[test]
+fn bubble_preview_frames_are_round() {
+    if !gst_ready() {
+        return;
+    }
+    let frame = first_preview_frame(solid(0xff00ff00), 64);
+    assert_round_bgra(&frame, 64);
+}
+
+/// The preview chain with the real camera (pipewiresrc advertises ANY caps,
+/// which once broke linking). `cargo test -- --ignored real_camera`.
+#[test]
+#[ignore = "needs a real camera"]
+fn real_camera_preview() {
+    if !gst_ready() {
+        return;
+    }
+    let source = gst::ElementFactory::make("pipewiresrc")
+        .build()
+        .expect("pipewiresrc");
+    let frame = first_preview_frame(source, 200);
+    assert_round_bgra(&frame, 200);
 }

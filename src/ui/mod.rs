@@ -1,6 +1,7 @@
 //! GTK4/libadwaita front end.
 
 mod audio_panel;
+mod camera_bubble;
 mod camera_panel;
 mod main_window;
 
@@ -37,6 +38,7 @@ fn activate(app: &adw::Application, options: LaunchOptions) {
         return;
     }
 
+    load_css();
     let settings = Settings::load_or_default();
     let controller = Controller::new(settings);
     let window = MainWindow::new(app, Rc::clone(&controller));
@@ -44,14 +46,17 @@ fn activate(app: &adw::Application, options: LaunchOptions) {
     install_actions(app, &window, &controller);
     {
         let controller = Rc::clone(&controller);
+        let main = Rc::clone(&window);
         window.window().connect_close_request(move |_| {
             // Discard any in-progress recording and break the reference cycle.
             controller.cancel();
+            main.close_bubble();
             controller.set_observer(None);
             glib::Propagation::Proceed
         });
     }
     window.present();
+    window.sync_bubble();
 
     if options.record_on_start {
         controller.start(Some(window.window().clone().upcast()));
@@ -120,4 +125,21 @@ fn install_actions(app: &adw::Application, window: &Rc<MainWindow>, controller: 
     }
     app.add_action(&quit);
     app.set_accels_for_action("app.quit", &["<Control>q"]);
+}
+
+fn load_css() {
+    let Some(display) = gtk::gdk::Display::default() else {
+        return;
+    };
+    let provider = gtk::CssProvider::new();
+    provider.load_from_string(camera_bubble::CSS);
+    // Above USER priority on purpose: themes installed in
+    // ~/.config/gtk-4.0/gtk.css (e.g. "window { background-color: … }")
+    // otherwise paint the bubble's transparent corners. The CSS only targets
+    // the bubble, so the user's theme still styles everything else.
+    gtk::style_context_add_provider_for_display(
+        &display,
+        &provider,
+        gtk::STYLE_PROVIDER_PRIORITY_USER + 1,
+    );
 }
