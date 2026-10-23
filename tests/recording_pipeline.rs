@@ -11,6 +11,7 @@ use gst::glib;
 use gst::prelude::*;
 use reelix::config::EncoderPreference;
 use reelix::recording::audio::{AacEncoderKind, AudioInput, AudioSourceElement};
+use reelix::recording::camera::{CameraInput, CameraLayout, CameraSource, Corner, Shape};
 use reelix::recording::{
     AudioConfig, EncoderKind, PipelineConfig, PipelineEvent, RecordingPipeline, VideoInput,
 };
@@ -45,25 +46,37 @@ struct Observed {
 /// Each test gets its own GLib main context: tests run in parallel threads
 /// and must not share the global default context.
 fn record(audio_inputs: Vec<AudioInput>, output: &Path) -> Observed {
+    let video = live("videotestsrc");
+    video.set_property_from_str("pattern", "ball");
+    record_with(video, audio_inputs, None, output)
+}
+
+fn record_with(
+    video: gst::Element,
+    audio_inputs: Vec<AudioInput>,
+    camera: Option<CameraInput>,
+    output: &Path,
+) -> Observed {
     let context = glib::MainContext::new();
     context
-        .with_thread_default(|| record_in_context(audio_inputs, output, &context))
+        .with_thread_default(|| record_in_context(video, audio_inputs, camera, output, &context))
         .expect("acquire main context")
 }
 
 fn record_in_context(
+    video: gst::Element,
     audio_inputs: Vec<AudioInput>,
+    camera: Option<CameraInput>,
     output: &Path,
     context: &glib::MainContext,
 ) -> Observed {
-    let video = live("videotestsrc");
-    video.set_property_from_str("pattern", "ball");
     let config = PipelineConfig {
         video: VideoInput::Element(video),
         audio: (!audio_inputs.is_empty()).then(|| AudioConfig {
             inputs: audio_inputs,
             encoder: AacEncoderKind::detect().expect("AAC encoder"),
         }),
+        camera,
         output: output.to_owned(),
         fps: 30,
         bits_per_pixel: 0.08,
@@ -300,4 +313,199 @@ fn loud_mix_is_limited_below_full_scale() {
     let peak = decoded_peak_db(&output);
     // Small allowance for AAC overshoot.
     assert!(peak < 0.3, "decoded peak {peak:.2} dBFS: the mix clips");
+}
+
+/// Solid-colour live source (videotestsrc defaults to 320×240).
+fn solid(argb: u32) -> gst::Element {
+    let src = live("videotestsrc");
+    src.set_property_from_str("pattern", "solid-color");
+    src.set_property("foreground-color", argb);
+    src
+}
+
+/// Decodes the video track and returns the last frame as I420 planes.
+struct Frame {
+    width: usize,
+    height: usize,
+    data: Vec<u8>,
+}
+
+impl Frame {
+    /// (Y, U, V) at pixel (x, y).
+    fn yuv(&self, x: u32, y: u32) -> (u8, u8, u8) {
+        let (x, y) = (x as usize, y as usize);
+        let (w, h) = (self.width, self.height);
+        let u_plane = w * h;
+        let v_plane = u_plane + (w / 2) * (h / 2);
+        let chroma = (y / 2) * (w / 2) + x / 2;
+        (
+            self.data[y * w + x],
+            self.data[u_plane + chroma],
+            self.data[v_plane + chroma],
+        )
+    }
+}
+
+fn last_frame(path: &Path) -> Frame {
+    use std::sync::{Arc, Mutex};
+    let pipeline = gst::parse::launch(&format!(
+        "filesrc location=\"{}\" ! qtdemux name=d d.video_0 ! decodebin ! videoconvert \
+         ! video/x-raw,format=I420 ! fakesink name=sink signal-handoffs=true sync=false",
+        path.display()
+    ))
+    .expect("parse")
+    .downcast::<gst::Pipeline>()
+    .expect("pipeline");
+    type DecodedFrame = (gst::Caps, Vec<u8>);
+    let last: Arc<Mutex<Option<DecodedFrame>>> = Arc::default();
+    {
+        let last = Arc::clone(&last);
+        pipeline
+            .by_name("sink")
+            .expect("sink")
+            .connect("handoff", false, move |args| {
+                let buffer = args[1].get::<gst::Buffer>().ok()?;
+                let pad = args[2].get::<gst::Pad>().ok()?;
+                let caps = pad.current_caps()?;
+                let map = buffer.map_readable().ok()?;
+                if let Ok(mut slot) = last.lock() {
+                    *slot = Some((caps, map.as_slice().to_vec()));
+                }
+                None
+            });
+    }
+    pipeline.set_state(gst::State::Playing).expect("play");
+    let bus = pipeline.bus().expect("bus");
+    for msg in bus.iter_timed(gst::ClockTime::from_seconds(20)) {
+        match msg.view() {
+            gst::MessageView::Eos(_) => break,
+            gst::MessageView::Error(err) => panic!("decode failed: {}", err.error()),
+            _ => {}
+        }
+    }
+    let _ = pipeline.set_state(gst::State::Null);
+    let (caps, data) = last.lock().expect("lock").take().expect("decoded a frame");
+    let s = caps.structure(0).expect("caps structure");
+    Frame {
+        width: s.get::<i32>("width").expect("width") as usize,
+        height: s.get::<i32>("height").expect("height") as usize,
+        data,
+    }
+}
+
+fn is_red(yuv: (u8, u8, u8)) -> bool {
+    // BT.601 red ≈ (81, 90, 240); allow for compression.
+    yuv.2 > 200 && yuv.1 < 130
+}
+
+fn is_green(yuv: (u8, u8, u8)) -> bool {
+    // BT.601 green ≈ (145, 54, 34).
+    yuv.0 > 110 && yuv.1 < 90 && yuv.2 < 80
+}
+
+fn record_camera(shape: Shape) -> Frame {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let output = dir.path().join("camera.mp4");
+    let layout = CameraLayout {
+        corner: Corner::BottomRight,
+        height_fraction: 0.25,
+        shape,
+        mirror: false,
+    };
+    let camera = CameraInput {
+        source: CameraSource::Element(solid(0xff00ff00)),
+        layout,
+    };
+    let observed = record_with(solid(0xffff0000), Vec::new(), Some(camera), &output);
+    assert!(observed.errors.is_empty(), "errors: {:?}", observed.errors);
+    assert!(observed.finalized);
+    last_frame(&output)
+}
+
+#[test]
+fn camera_rectangle_is_composited_bottom_right() {
+    if !gst_ready() {
+        return;
+    }
+    let frame = record_camera(Shape::Rectangle);
+    assert_eq!((frame.width, frame.height), (320, 240));
+    let layout = CameraLayout {
+        corner: Corner::BottomRight,
+        height_fraction: 0.25,
+        shape: Shape::Rectangle,
+        mirror: false,
+    };
+    let r = layout.bubble_rect(320, 240);
+    let centre = frame.yuv(r.x + r.width / 2, r.y + r.height / 2);
+    assert!(is_green(centre), "bubble centre {centre:?}");
+    assert!(is_green(frame.yuv(r.x + 3, r.y + 3)), "rectangle corner");
+    assert!(
+        is_red(frame.yuv(20, 20)),
+        "screen area {:?}",
+        frame.yuv(20, 20)
+    );
+    assert!(
+        is_red(frame.yuv(r.x - 6, r.y + r.height / 2)),
+        "left of bubble"
+    );
+}
+
+#[test]
+fn camera_circle_masks_the_corners() {
+    if !gst_ready() {
+        return;
+    }
+    let frame = record_camera(Shape::Circle);
+    let layout = CameraLayout {
+        corner: Corner::BottomRight,
+        height_fraction: 0.25,
+        shape: Shape::Circle,
+        mirror: false,
+    };
+    let r = layout.bubble_rect(320, 240);
+    let centre = frame.yuv(r.x + r.width / 2, r.y + r.height / 2);
+    assert!(is_green(centre), "bubble centre {centre:?}");
+    // The square's corner lies outside the circle: the screen shows through.
+    let corner = frame.yuv(r.x + 3, r.y + 3);
+    assert!(
+        is_red(corner),
+        "circle corner should be transparent: {corner:?}"
+    );
+    assert!(is_red(frame.yuv(20, 20)));
+}
+
+/// Same composition with the real webcam through PipeWire. Needs a camera,
+/// so it only runs on demand: `cargo test -- --ignored real_camera`.
+#[test]
+#[ignore = "needs a real camera"]
+fn real_camera_composition() {
+    if !gst_ready() {
+        return;
+    }
+    for shape in [Shape::Rectangle, Shape::Circle] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let output = dir.path().join("real-camera.mp4");
+        let camera = CameraInput {
+            source: CameraSource::Element(
+                gst::ElementFactory::make("pipewiresrc")
+                    .build()
+                    .expect("pipewiresrc"),
+            ),
+            layout: CameraLayout {
+                corner: Corner::BottomRight,
+                height_fraction: 0.25,
+                shape,
+                mirror: true,
+            },
+        };
+        let observed = record_with(solid(0xffff0000), Vec::new(), Some(camera), &output);
+        assert!(
+            observed.errors.is_empty(),
+            "{shape:?}: {:?}",
+            observed.errors
+        );
+        assert!(observed.finalized, "{shape:?} not finalized");
+        let (video, _) = track_durations(&output);
+        assert!(video.is_some_and(|d| d > 2.0), "{shape:?}: video {video:?}");
+    }
 }

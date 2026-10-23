@@ -9,6 +9,7 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 
 use super::audio_panel::AudioPanel;
+use super::camera_panel::CameraPanel;
 use crate::app::{Controller, ControllerObserver, RecorderState};
 use crate::branding;
 use crate::error::AppError;
@@ -26,6 +27,7 @@ pub struct MainWindow {
     timer_label: gtk::Label,
     level_bar: gtk::LevelBar,
     audio_panel: AudioPanel,
+    camera_panel: CameraPanel,
     recent_group: adw::PreferencesGroup,
     recent_rows: RefCell<Vec<adw::ActionRow>>,
     timer_source: RefCell<Option<glib::SourceId>>,
@@ -91,8 +93,10 @@ impl MainWindow {
         recent_group.set_header_suffix(Some(&open_folder));
 
         let audio_panel = AudioPanel::new(&controller);
+        let camera_panel = CameraPanel::new(&controller);
         let groups = gtk::Box::new(gtk::Orientation::Vertical, 0);
         groups.append(audio_panel.widget());
+        groups.append(camera_panel.widget());
         groups.append(&recent_group);
 
         let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -141,7 +145,7 @@ impl MainWindow {
             .application(app)
             .title(branding::APP_NAME)
             .default_width(480)
-            .default_height(640)
+            .default_height(720)
             .width_request(360)
             .height_request(400)
             .content(&toolbar)
@@ -157,6 +161,7 @@ impl MainWindow {
             timer_label,
             level_bar,
             audio_panel,
+            camera_panel,
             recent_group,
             recent_rows: RefCell::new(Vec::new()),
             timer_source: RefCell::new(None),
@@ -269,6 +274,7 @@ impl MainWindow {
             self.level_bar.set_value(0.0);
         }
         self.audio_panel.set_sensitive(!state.is_busy());
+        self.camera_panel.set_sensitive(!state.is_busy());
         self.set_inhibited(capturing);
 
         let (icon, title, description) = match state {

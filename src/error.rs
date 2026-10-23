@@ -18,6 +18,12 @@ pub enum AppError {
     #[error("the portal returned no streams")]
     NoStream,
 
+    #[error("no camera is available")]
+    NoCamera,
+
+    #[error("camera access was denied")]
+    CameraDenied,
+
     #[error("GStreamer initialization failed: {0}")]
     GstInit(String),
 
@@ -84,6 +90,14 @@ impl AppError {
             Self::NoStream => (
                 "No se pudo acceder a la pantalla".into(),
                 "El portal de captura no devolvió ninguna fuente. Inténtalo de nuevo.".into(),
+            ),
+            Self::NoCamera => (
+                "No hay cámara disponible".into(),
+                "No se detectó ninguna cámara. Se grabará sin ella.".into(),
+            ),
+            Self::CameraDenied => (
+                "Acceso a la cámara denegado".into(),
+                "Puedes permitirlo en Configuración → Privacidad → Cámara.".into(),
             ),
             Self::GstInit(_) | Self::MissingElement(_) => (
                 "Faltan componentes multimedia".into(),

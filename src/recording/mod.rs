@@ -1,4 +1,5 @@
 pub mod audio;
+pub mod camera;
 pub mod encoder;
 pub mod pipeline;
 

@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! pipewiresrc (portal fd + node id)
+//!   [→ compositor with the camera bubble (camera.rs)]
 //!   → videoconvert (BGRx → I420/NV12, multithreaded, no dithering)
 //!   → videoscale + capsfilter (output size fixed to the first negotiated size)
 //!   → videorate max-rate=fps (drop-only: never duplicates frames)
@@ -27,6 +28,7 @@ use std::time::Duration;
 use gst::prelude::*;
 
 use super::audio::{self, AacEncoderKind, AudioInput};
+use super::camera::{self, CameraInput, CameraLayout};
 use super::encoder::{EncoderKind, target_bitrate};
 use crate::error::{AppError, Result};
 
@@ -56,6 +58,7 @@ pub struct AudioConfig {
 pub struct PipelineConfig {
     pub video: VideoInput,
     pub audio: Option<AudioConfig>,
+    pub camera: Option<CameraInput>,
     pub output: PathBuf,
     pub fps: u32,
     pub bits_per_pixel: f64,
@@ -84,6 +87,7 @@ pub struct RecordingPipeline {
     resolution: Arc<Mutex<Option<(u32, u32)>>>,
     finishing: Arc<AtomicBool>,
     has_audio: bool,
+    has_camera: bool,
     _bus_watch: gst::bus::BusWatchGuard,
 }
 
@@ -148,8 +152,17 @@ impl RecordingPipeline {
         let sink = make("filesink", "sink")?;
         sink.set_property("location", config.output.to_string_lossy().as_ref());
 
+        let mut capture_sources = vec![SCREEN_SOURCE_NAME.to_owned()];
+        let composition = match &config.camera {
+            Some(input) => {
+                let composition = camera::build(&pipeline, input, config.fps)?;
+                capture_sources.push(camera::CAMERA_SOURCE_NAME.to_owned());
+                Some((composition, input.layout))
+            }
+            None => None,
+        };
+
         let chain = [
-            &source,
             &convert,
             &scale,
             &size_filter,
@@ -163,14 +176,24 @@ impl RecordingPipeline {
         pipeline
             .add_many(chain)
             .map_err(|e| AppError::Pipeline(e.to_string()))?;
+        pipeline
+            .add(&source)
+            .map_err(|e| AppError::Pipeline(e.to_string()))?;
         gst::Element::link_many(chain).map_err(|e| AppError::Pipeline(e.to_string()))?;
+        let link_err = |e: gst::glib::BoolError| AppError::Pipeline(e.to_string());
+        match &composition {
+            Some((comp, _)) => {
+                source.link(&comp.screen_input).map_err(link_err)?;
+                comp.output.link(&convert).map_err(link_err)?;
+            }
+            None => source.link(&convert).map_err(link_err)?,
+        }
         // Variable frame rate timestamps need a fine timescale; the automatic
         // one is derived from the (absent) frame rate and loses precision.
         if let Some(mux_pad) = parse.static_pad("src").and_then(|p| p.peer()) {
             mux_pad.set_property("trak-timescale", VIDEO_TIMESCALE);
         }
 
-        let mut capture_sources = vec![SCREEN_SOURCE_NAME.to_owned()];
         let has_audio = match &config.audio {
             Some(audio_config) if !audio_config.inputs.is_empty() => {
                 capture_sources.extend(audio::build_branch(
@@ -191,6 +214,9 @@ impl RecordingPipeline {
             &encoder,
             config,
             format,
+            composition
+                .as_ref()
+                .map(|(comp, layout)| (comp.camera_pad.clone(), *layout)),
             Arc::clone(&resolution),
         )?;
 
@@ -201,6 +227,7 @@ impl RecordingPipeline {
         tracing::info!(
             encoder = %config.encoder,
             audio = has_audio,
+            camera = composition.is_some(),
             output = %config.output.display(),
             "recording pipeline built"
         );
@@ -210,15 +237,36 @@ impl RecordingPipeline {
             resolution,
             finishing,
             has_audio,
+            has_camera: composition.is_some(),
             _bus_watch: bus_watch,
         })
     }
 
     pub fn start(&self) -> Result<()> {
-        self.pipeline
-            .set_state(gst::State::Playing)
-            .map(|_| ())
-            .map_err(|e| AppError::Pipeline(format!("failed to start pipeline: {e}")))
+        match self.pipeline.set_state(gst::State::Playing) {
+            Ok(_) => Ok(()),
+            // The state change result carries no detail; the reason is an
+            // error message already waiting on the bus.
+            Err(_) => Err(self.pending_error().unwrap_or_else(|| {
+                AppError::Pipeline("failed to start pipeline (no error on the bus)".into())
+            })),
+        }
+    }
+
+    fn pending_error(&self) -> Option<AppError> {
+        let bus = self.pipeline.bus()?;
+        let msg = bus.pop_filtered(&[gst::MessageType::Error])?;
+        let gst::MessageView::Error(err) = msg.view() else {
+            return None;
+        };
+        let source_element = msg.src().map(|s| s.name().to_string()).unwrap_or_default();
+        let details = err.debug().map(|d| d.to_string()).unwrap_or_default();
+        tracing::error!(source = %source_element, error = %err.error(), %details, "pipeline failed to start");
+        Some(AppError::Streaming {
+            source_element,
+            message: err.error().to_string(),
+            debug: details,
+        })
     }
 
     /// Requests a clean stop. The file is complete once
@@ -236,6 +284,10 @@ impl RecordingPipeline {
 
     pub fn has_audio(&self) -> bool {
         self.has_audio
+    }
+
+    pub fn has_camera(&self) -> bool {
+        self.has_camera
     }
 
     /// Output resolution, once the first frame has been negotiated.
@@ -318,13 +370,16 @@ fn request_finish(pipeline: &gst::Pipeline, finishing: &AtomicBool) {
 /// dimensions that 4:2:0 encoders reject. The first negotiated size is
 /// rounded down to even numbers and locked in the capsfilter; later resizes
 /// are scaled (with borders) into that frame so the MP4 never changes caps.
-/// The bitrate is computed from that real size.
+/// The bitrate is computed from that real size, and the camera bubble (if
+/// any) is placed relative to it.
+#[allow(clippy::too_many_arguments)]
 fn install_size_lock(
     source: &gst::Element,
     size_filter: &gst::Element,
     encoder: &gst::Element,
     config: &PipelineConfig,
     format: &'static str,
+    bubble: Option<(gst::Pad, CameraLayout)>,
     resolution: Arc<Mutex<Option<(u32, u32)>>>,
 ) -> Result<()> {
     let pad = source
@@ -370,6 +425,9 @@ fn install_size_lock(
         }
         if let Some(enc) = encoder.upgrade() {
             kind.set_bitrate(&enc, target_bitrate(w, h, fps, bpp));
+        }
+        if let Some((pad, layout)) = &bubble {
+            camera::position_bubble(pad, layout, w, h);
         }
         *locked = Some((w, h));
         gst::PadProbeReturn::Remove

@@ -1,5 +1,6 @@
 mod settings;
 
 pub use settings::{
-    AudioSettings, EncoderPreference, Quality, Settings, StorageSettings, VideoSettings,
+    AudioSettings, CameraCorner, CameraSettings, CameraShape, CameraSize, EncoderPreference,
+    Quality, Settings, StorageSettings, VideoSettings,
 };

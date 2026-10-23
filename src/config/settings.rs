@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::branding;
 use crate::error::{AppError, Result};
+use crate::recording::camera::{CameraLayout, Corner, Shape};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -82,6 +83,79 @@ impl Default for AudioSettings {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum CameraSize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+}
+
+impl CameraSize {
+    pub const ALL: [CameraSize; 3] = [Self::Small, Self::Medium, Self::Large];
+
+    /// Bubble height as a fraction of the recording height.
+    pub fn height_fraction(self) -> f64 {
+        match self {
+            Self::Small => 0.18,
+            Self::Medium => 0.25,
+            Self::Large => 0.33,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum CameraShape {
+    /// 4:3 rectangle; cheapest (compositing stays in I420).
+    #[default]
+    Rectangle,
+    /// Round bubble; needs per-pixel alpha (≈ +20 % CPU on 1080p).
+    Circle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum CameraCorner {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    #[default]
+    BottomRight,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct CameraSettings {
+    pub enabled: bool,
+    /// PipeWire `node.name` of the camera; `None` lets PipeWire choose.
+    pub device: Option<String>,
+    pub size: CameraSize,
+    pub shape: CameraShape,
+    pub corner: CameraCorner,
+    pub mirror: bool,
+}
+
+impl CameraSettings {
+    pub fn layout(&self) -> CameraLayout {
+        CameraLayout {
+            corner: match self.corner {
+                CameraCorner::TopLeft => Corner::TopLeft,
+                CameraCorner::TopRight => Corner::TopRight,
+                CameraCorner::BottomLeft => Corner::BottomLeft,
+                CameraCorner::BottomRight => Corner::BottomRight,
+            },
+            height_fraction: self.size.height_fraction(),
+            shape: match self.shape {
+                CameraShape::Rectangle => Shape::Rectangle,
+                CameraShape::Circle => Shape::Circle,
+            },
+            mirror: self.mirror,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct StorageSettings {
@@ -94,6 +168,7 @@ pub struct StorageSettings {
 pub struct Settings {
     pub video: VideoSettings,
     pub audio: AudioSettings,
+    pub camera: CameraSettings,
     pub storage: StorageSettings,
 }
 
@@ -111,13 +186,12 @@ impl Settings {
         } else {
             1.0
         };
-        if self
-            .audio
-            .microphone_device
-            .as_ref()
-            .is_some_and(|d| d.trim().is_empty())
-        {
+        let blank = |d: &Option<String>| d.as_ref().is_some_and(|d| d.trim().is_empty());
+        if blank(&self.audio.microphone_device) {
             self.audio.microphone_device = None;
+        }
+        if blank(&self.camera.device) {
+            self.camera.device = None;
         }
         self
     }
@@ -262,6 +336,39 @@ mod tests {
             Settings::load_from(&path),
             Err(AppError::Config { .. })
         ));
+    }
+
+    #[test]
+    fn camera_defaults_are_off_bottom_right_rectangle() {
+        let c = Settings::default().camera;
+        assert!(!c.enabled);
+        assert_eq!(c.corner, CameraCorner::BottomRight);
+        assert_eq!(c.shape, CameraShape::Rectangle);
+        assert_eq!(c.size, CameraSize::Medium);
+        let layout = c.layout();
+        assert_eq!(layout.corner, Corner::BottomRight);
+        assert_eq!(layout.height_fraction, 0.25);
+    }
+
+    #[test]
+    fn camera_settings_parse_from_toml() {
+        let s: Settings = toml::from_str(
+            "[camera]\nenabled = true\nsize = \"large\"\nshape = \"circle\"\ncorner = \"top-left\"\n",
+        )
+        .expect("valid toml");
+        assert!(s.camera.enabled);
+        assert_eq!(s.camera.layout().shape, Shape::Circle);
+        assert_eq!(s.camera.layout().corner, Corner::TopLeft);
+        assert_eq!(s.camera.layout().height_fraction, 0.33);
+    }
+
+    #[test]
+    fn camera_sizes_are_ordered() {
+        let f: Vec<f64> = CameraSize::ALL
+            .iter()
+            .map(|s| s.height_fraction())
+            .collect();
+        assert!(f.windows(2).all(|w| w[0] < w[1]));
     }
 
     #[test]

@@ -31,6 +31,11 @@
     <control>pointing</control>
   </supports>
   <releases>
+    <release version="0.3.0" date="2026-10-22">
+      <description>
+        <p>Phase 3: overlay the webcam on the recording as a rectangle or a circle, in any corner, in three sizes.</p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-10-22">
       <description>
         <p>Phase 2: record the microphone and system audio (mixed, with a level meter and a limiter) into the MP4 as AAC.</p>

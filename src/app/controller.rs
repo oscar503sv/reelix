@@ -11,10 +11,12 @@ use chrono::{DateTime, Local};
 use gtk::glib;
 
 use super::state::{RecorderEvent, RecorderState};
+use crate::capture::camera::{self as camera_capture, CameraAccess};
 use crate::capture::{CaptureRequest, ScreenCastSession, SourceKind, audio as audio_capture};
 use crate::config::Settings;
 use crate::error::AppError;
 use crate::recording::audio::{AacEncoderKind, AudioInput, AudioSourceElement};
+use crate::recording::camera::{CameraInput, CameraSource};
 use crate::recording::{
     AudioConfig, EncoderKind, PipelineConfig, PipelineEvent, RecordingPipeline, VideoInput,
 };
@@ -37,6 +39,8 @@ pub trait ControllerObserver {
 
 struct ActiveRecording {
     session: Rc<ScreenCastSession>,
+    /// Keeps the camera portal's PipeWire remote open while recording.
+    _camera: Option<CameraAccess>,
     pipeline: RecordingPipeline,
     output: PathBuf,
     started_at: DateTime<Local>,
@@ -140,7 +144,19 @@ impl Controller {
             }
 
             match result {
-                Ok(session) => this.begin_recording(Rc::new(session), generation),
+                Ok(session) => {
+                    if !this.apply(RecorderEvent::SourceSelected) {
+                        session.close().await;
+                        return;
+                    }
+                    let camera = this.request_camera().await;
+                    if this.generation.get() != generation {
+                        tracing::debug!("cancelled while opening the camera; discarding");
+                        session.close().await;
+                        return;
+                    }
+                    this.begin_recording(Rc::new(session), camera, generation);
+                }
                 Err(AppError::SelectionCancelled) => {
                     tracing::info!("user cancelled source selection");
                     this.apply(RecorderEvent::SelectionCancelled);
@@ -150,11 +166,30 @@ impl Controller {
         });
     }
 
-    fn begin_recording(self: &Rc<Self>, session: Rc<ScreenCastSession>, generation: u64) {
-        if !self.apply(RecorderEvent::SourceSelected) {
-            return;
+    /// Opens the camera if enabled. Any problem means recording without it
+    /// (with a notice), never a failed recording.
+    async fn request_camera(&self) -> Option<CameraAccess> {
+        if !self.settings.borrow().camera.enabled {
+            return None;
         }
-        match self.build_pipeline(&session) {
+        match CameraAccess::request().await {
+            Ok(access) => Some(access),
+            Err(e) => {
+                tracing::warn!(error = %e, "recording without camera");
+                let (title, _) = e.user_message();
+                self.notify(&format!("{title}: se graba sin cámara."));
+                None
+            }
+        }
+    }
+
+    fn begin_recording(
+        self: &Rc<Self>,
+        session: Rc<ScreenCastSession>,
+        camera: Option<CameraAccess>,
+        generation: u64,
+    ) {
+        match self.build_pipeline(&session, camera) {
             Ok(active) => {
                 if let Err(e) = active.pipeline.start() {
                     close_session(session);
@@ -174,6 +209,7 @@ impl Controller {
     fn build_pipeline(
         self: &Rc<Self>,
         session: &Rc<ScreenCastSession>,
+        camera: Option<CameraAccess>,
     ) -> Result<ActiveRecording, AppError> {
         let settings = self.settings.borrow().clone();
         let encoder = EncoderKind::detect(settings.video.encoder)?;
@@ -181,6 +217,13 @@ impl Controller {
         let output = self.library().new_recording_path(&started_at)?;
 
         let audio = self.resolve_audio(&settings);
+        let camera_input = camera.as_ref().map(|access| CameraInput {
+            source: CameraSource::PipeWire {
+                fd: access.pipewire_fd(),
+                target: self.resolve_camera_device(settings.camera.device.as_deref()),
+            },
+            layout: settings.camera.layout(),
+        });
 
         let config = PipelineConfig {
             video: VideoInput::PipeWire {
@@ -188,6 +231,7 @@ impl Controller {
                 node_id: session.node_id(),
             },
             audio,
+            camera: camera_input,
             output: output.clone(),
             fps: settings.video.fps,
             bits_per_pixel: settings.video.quality.bits_per_pixel(),
@@ -203,6 +247,7 @@ impl Controller {
 
         Ok(ActiveRecording {
             session: Rc::clone(session),
+            _camera: camera,
             pipeline,
             output,
             started_at,
@@ -251,6 +296,22 @@ impl Controller {
         }
     }
 
+    /// Returns the configured camera if it is connected, else `None`
+    /// (PipeWire picks one) with a notice.
+    fn resolve_camera_device(&self, wanted: Option<&str>) -> Option<String> {
+        let wanted = wanted?;
+        if camera_capture::list_cameras()
+            .iter()
+            .any(|c| c.id == wanted)
+        {
+            Some(wanted.to_owned())
+        } else {
+            tracing::warn!(device = %wanted, "configured camera missing; using default");
+            self.notify("La cámara elegida no está conectada: se usa la predeterminada.");
+            None
+        }
+    }
+
     fn notify(&self, message: &str) {
         if let Some(observer) = self.observer() {
             observer.notice(message);
@@ -285,6 +346,8 @@ impl Controller {
             PipelineEvent::SourceLost { source } => {
                 if source.starts_with(crate::recording::audio::AUDIO_SOURCE_PREFIX) {
                     self.notify("Se perdió una fuente de audio; se guardó lo grabado.");
+                } else if source == crate::recording::camera::CAMERA_SOURCE_NAME {
+                    self.notify("Se perdió la cámara; se guardó lo grabado.");
                 }
                 if self.state.borrow().is_capturing() {
                     self.apply(RecorderEvent::StopRequested);
@@ -348,7 +411,7 @@ impl Controller {
                 .map(|(w, h)| format!("{w}x{h}")),
             fps: active.fps,
             audio: active.pipeline.has_audio(),
-            camera: false,
+            camera: active.pipeline.has_camera(),
             encoder: Some(active.encoder.factory_name().to_owned()),
         };
         active.pipeline.abort();

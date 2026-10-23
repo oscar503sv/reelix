@@ -37,7 +37,10 @@ Tests:
   producción con fuentes de prueba en vivo (vídeo + dos de audio): parada por
   EOS, duraciones de audio/vídeo alineadas, pista estéreo, mensajes de nivel
   y que una mezcla a +6 dBFS sale limitada por debajo de 0 dBFS. Cada test usa
-  su propio `glib::MainContext` (los tests corren en paralelo).
+  su propio `glib::MainContext` (los tests corren en paralelo). También
+  compone una "cámara" verde sobre una "pantalla" roja y comprueba píxel a
+  píxel posición, tamaño y máscara circular.
+- Con cámara real (no corre en CI): `cargo test -- --ignored real_camera`.
 
 La captura vía portal no se puede automatizar (GNOME siempre pide
 confirmación), así que la prueba funcional es manual:
@@ -52,6 +55,8 @@ confirmación), así que la prueba funcional es manual:
    `ffprobe -show_entries stream=codec_type,channels,start_time,duration`
    que hay pista AAC estéreo alineada con el vídeo, y escuchar que la voz
    coincide con la imagen.
+6. Cámara: grabar con rectángulo y con círculo; comprobar posición, bordes
+   y sincronía labios-voz.
 
 ## Instalación local
 

@@ -9,9 +9,10 @@ ScreenCast de XDG, PipeWire y GStreamer.
 - Ligero: el procesamiento de vídeo lo hace GStreamer (C, multihilo); Rust
   coordina, gestiona estado y UI.
 
-> Estado: **Fase 2 (audio) completada.** Graba pantalla o ventana con
-> micrófono y/o audio del sistema a MP4 (H.264 + AAC). Cámara (Fase 3) y UX
-> completa (Fase 4) están pendientes. Ver [Hoja de ruta](#hoja-de-ruta).
+> Estado: **Fase 3 (cámara) completada.** Graba pantalla o ventana con
+> micrófono, audio del sistema y la cámara superpuesta a MP4 (H.264 + AAC).
+> La vista previa en vivo y la UX completa (Fase 4) están pendientes. Ver
+> [Hoja de ruta](#hoja-de-ruta).
 
 ## Qué hace
 
@@ -23,6 +24,9 @@ ScreenCast de XDG, PipeWire y GStreamer.
   que suena en los altavoces), por separado o mezclados, con medidor de nivel
   en vivo. Al mezclar, el audio del sistema se baja al 60 % para que la voz
   se entienda, y un limitador evita la saturación.
+- **Cámara** superpuesta en el vídeo: rectángulo 4:3 o círculo, tres
+  tamaños, cuatro esquinas, efecto espejo opcional. Se compone dentro del
+  archivo; todavía no se muestra en pantalla mientras grabas (Fase 4).
 - Cronómetro en vivo, botón **Detener**, **Esc** cancela y descarta.
 - Detener desde el indicador "compartiendo pantalla" de GNOME también
   finaliza el archivo correctamente.
@@ -125,6 +129,14 @@ microphone = true
 microphone_volume = 1.0  # 0.0–4.0
 system_audio = false
 
+[camera]
+enabled = false
+# device = "v4l2_input.…"  # node.name
+size = "medium"          # small | medium | large (18 / 25 / 33 % de la altura)
+shape = "rectangle"      # rectangle | circle (el círculo usa más CPU)
+corner = "bottom-right"  # top-left | top-right | bottom-left | bottom-right
+mirror = false
+
 [storage]
 # recording_dir = "/home/usuario/Vídeos/Reelix"
 ```
@@ -139,6 +151,8 @@ system_audio = false
 | CPU alta al grabar | Estás usando codificación por software; instala `intel-media-driver` (ver arriba). |
 | Aviso "No se encontró ningún micrófono" | Revisa Configuración → Sonido → Entrada de GNOME y `wpctl status`. La grabación continúa sin micrófono. |
 | La barra de nivel no se mueve | El micrófono está silenciado o con volumen 0 en GNOME, o se eligió otro dispositivo. |
+| Aviso "No hay cámara disponible" | Comprueba que la cámara aparece en `wpctl status` (sección Video) y que no la usa otra app. |
+| Acceso a la cámara denegado | Configuración → Privacidad → Cámara. |
 | El audio del sistema no se graba | Necesita `pipewire-pulseaudio` (capa PulseAudio de PipeWire): `pactl info` debe responder. |
 | Log con `stream error: target not found` al parar | Normal: el portal cerró el stream después de finalizar el archivo. |
 
@@ -150,6 +164,7 @@ Para depurar: `RUST_LOG=reelix=debug GST_DEBUG=pipewiresrc:4,pulsesrc:4,mp4mux:4
 GTK4/libadwaita (UI) → Controller + máquina de estados → Portal ScreenCast (ashpd)
    → PipeWire fd → GStreamer: pipewiresrc → videoconvert → encoder H.264 ─┐
    micrófono / monitor del sistema → pulsesrc → audiomixer → limitador → AAC ─┴→ mp4mux → archivo
+   (con cámara: portal Camera → pipewiresrc → recorte/escala ─→ compositor antes del encoder)
 ```
 
 Detalles y decisiones en [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -158,7 +173,7 @@ Detalles y decisiones en [ARCHITECTURE.md](ARCHITECTURE.md).
 
 - [x] **Fase 1**: GUI → portal → PipeWire → GStreamer → MP4.
 - [x] **Fase 2**: micrófono y audio del sistema (PipeWire) + AAC en el mismo MP4.
-- [ ] **Fase 3**: cámara (portal Camera) + composición en el pipeline.
+- [x] **Fase 3**: cámara (portal Camera) + composición en el pipeline.
 - [ ] **Fase 4**: pausa, overlay, countdown, biblioteca completa, settings, atajos globales.
 - [ ] **Fase 5**: medición y optimización (VA-API sin copias, DMA-BUF).
 - [ ] Empaquetado RPM y Flatpak.
