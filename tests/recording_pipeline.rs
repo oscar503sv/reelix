@@ -653,3 +653,104 @@ fn pause_leaves_no_gap_and_stop_while_paused_finalizes() {
         "A/V mismatch: {video}s vs {audio}s"
     );
 }
+
+/// Top-level MP4 boxes as (type, size).
+fn mp4_boxes(path: &Path) -> Vec<(String, u64)> {
+    let data = std::fs::read(path).expect("read mp4");
+    let mut boxes = Vec::new();
+    let mut i = 0usize;
+    while i + 8 <= data.len() {
+        let mut size = u64::from(u32::from_be_bytes(
+            data[i..i + 4].try_into().expect("4 bytes"),
+        ));
+        let kind = String::from_utf8_lossy(&data[i + 4..i + 8]).into_owned();
+        if size == 1 {
+            size = u64::from_be_bytes(data[i + 8..i + 16].try_into().expect("8 bytes"));
+        }
+        boxes.push((kind, size));
+        if size == 0 {
+            break;
+        }
+        i += usize::try_from(size).expect("box size");
+    }
+    boxes
+}
+
+/// Recording writes a fragmented MP4 (crash-safe, no padding); the remux
+/// step turns it into a regular faststart MP4 with both tracks intact.
+#[test]
+fn remux_produces_faststart_mp4_without_padding() {
+    use reelix::recording::remux::Remux;
+    if !gst_ready() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let output = dir.path().join("remux.mp4");
+    let observed = record(vec![audio_input(true, "sine")], &output);
+    assert!(
+        observed.finalized && observed.errors.is_empty(),
+        "{:?}",
+        observed.errors
+    );
+
+    let recorded: Vec<String> = mp4_boxes(&output).into_iter().map(|(k, _)| k).collect();
+    assert!(
+        recorded.contains(&"moof".to_owned()),
+        "recording is fragmented: {recorded:?}"
+    );
+    let (video_before, audio_before) = track_durations(&output);
+
+    let context = glib::MainContext::new();
+    let result = context
+        .with_thread_default(|| {
+            let main_loop = glib::MainLoop::new(Some(&context), false);
+            let result = Rc::new(RefCell::new(None));
+            let job = {
+                let result = Rc::clone(&result);
+                let main_loop = main_loop.clone();
+                Remux::start(&output, move |r| {
+                    *result.borrow_mut() = Some(r.map_err(|e| e.to_string()));
+                    main_loop.quit();
+                })
+                .expect("remux starts")
+            };
+            let ml = main_loop.clone();
+            let _safety = once_after(Duration::from_secs(20), &context, move || ml.quit());
+            main_loop.run();
+            drop(job);
+            result.take()
+        })
+        .expect("context");
+    assert_eq!(result, Some(Ok(())), "remux finished");
+
+    let boxes = mp4_boxes(&output);
+    let kinds: Vec<&str> = boxes.iter().map(|(k, _)| k.as_str()).collect();
+    let moov = kinds.iter().position(|k| *k == "moov").expect("moov");
+    let mdat = kinds.iter().position(|k| *k == "mdat").expect("mdat");
+    assert!(moov < mdat, "index before data (faststart): {kinds:?}");
+    assert!(!kinds.contains(&"moof"), "no fragments left: {kinds:?}");
+    let padding: u64 = boxes
+        .iter()
+        .filter(|(k, _)| k == "free")
+        .map(|(_, s)| s)
+        .sum();
+    assert!(padding < 64 * 1024, "no big padding: {padding} bytes");
+    assert!(
+        !dir.path().join("remux.mp4.remux.tmp").exists(),
+        "temp file cleaned up"
+    );
+
+    let (video_after, audio_after) = track_durations(&output);
+    let close = |a: Option<f64>, b: Option<f64>| match (a, b) {
+        (Some(a), Some(b)) => (a - b).abs() < 0.1,
+        _ => false,
+    };
+    assert!(
+        close(video_before, video_after),
+        "video {video_before:?} → {video_after:?}"
+    );
+    assert!(
+        close(audio_before, audio_after),
+        "audio {audio_before:?} → {audio_after:?}"
+    );
+}

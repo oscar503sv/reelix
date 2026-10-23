@@ -17,6 +17,7 @@ use crate::config::Settings;
 use crate::error::AppError;
 use crate::recording::audio::{AacEncoderKind, AudioInput, AudioSourceElement};
 use crate::recording::camera::{CameraInput, CameraSource};
+use crate::recording::remux::Remux;
 use crate::recording::{
     AudioConfig, EncoderKind, PipelineConfig, PipelineEvent, RecordingPipeline, VideoInput,
 };
@@ -66,6 +67,8 @@ pub struct Controller {
     /// The on-screen camera bubble is showing: a full-screen recording
     /// captures it, so the camera only needs compositing for window captures.
     bubble_active: Cell<bool>,
+    /// Fragmented → faststart conversion running during `Processing`.
+    remux: RefCell<Option<Remux>>,
 }
 
 impl Controller {
@@ -77,6 +80,7 @@ impl Controller {
             generation: Cell::new(0),
             observer: RefCell::new(None),
             bubble_active: Cell::new(false),
+            remux: RefCell::new(None),
         })
     }
 
@@ -502,15 +506,55 @@ impl Controller {
         };
         active.pipeline.abort();
         close_session(Rc::clone(&active.session));
+        let stats = active.pipeline.stats();
+        tracing::info!(
+            path = %active.output.display(),
+            duration,
+            frames = stats.encoded,
+            dropped = stats.dropped,
+            avg_encode_ms = stats.avg_latency.as_secs_f64() * 1000.0,
+            max_encode_ms = stats.max_latency.as_secs_f64() * 1000.0,
+            "recording saved"
+        );
+        if stats.drop_ratio() > 0.02 {
+            tracing::warn!(
+                ratio = stats.drop_ratio(),
+                "encoder could not keep up; frames were dropped"
+            );
+        }
 
-        let meta_path = naming::metadata_path_for(&active.output);
+        let metadata = Rc::new(metadata);
+        let output = active.output.clone();
+        let weak = Rc::downgrade(self);
+        let for_remux = Rc::clone(&metadata);
+        let complete = move |result: crate::error::Result<()>| {
+            if let Err(e) = result {
+                // The fragmented file is still a valid MP4; keep it.
+                tracing::warn!(error = %e, "remux failed; keeping fragmented MP4");
+            }
+            if let Some(this) = weak.upgrade() {
+                this.remux.borrow_mut().take();
+                this.complete_recording(&output, &for_remux);
+            }
+        };
+        match Remux::start(&active.output, complete) {
+            Ok(job) => *self.remux.borrow_mut() = Some(job),
+            Err(e) => {
+                tracing::warn!(error = %e, "cannot start remux; keeping fragmented MP4");
+                self.complete_recording(&active.output, &metadata);
+            }
+        }
+    }
+
+    /// Last step of a recording: metadata next to the final file.
+    fn complete_recording(&self, output: &std::path::Path, metadata: &RecordingMetadata) {
+        let meta_path = naming::metadata_path_for(output);
         if let Err(e) = metadata.write(&meta_path) {
             // The video itself is fine; missing metadata is not fatal.
             tracing::error!(error = %e, "failed to write metadata");
         }
-        tracing::info!(path = %active.output.display(), duration, "recording saved");
         self.apply(RecorderEvent::MetadataWritten {
-            path: active.output,
+            path: output.to_owned(),
         });
     }
 

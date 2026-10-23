@@ -2,6 +2,8 @@ pub mod audio;
 pub mod camera;
 pub mod encoder;
 pub mod pipeline;
+pub mod remux;
+pub mod stats;
 
 pub use encoder::EncoderKind;
 pub use pipeline::{AudioConfig, PipelineConfig, PipelineEvent, RecordingPipeline, VideoInput};

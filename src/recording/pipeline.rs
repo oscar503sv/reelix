@@ -30,10 +30,13 @@ use gst::prelude::*;
 use super::audio::{self, AacEncoderKind, AudioInput};
 use super::camera::{self, CameraInput, CameraLayout};
 use super::encoder::{EncoderKind, target_bitrate};
+use super::stats::{PipelineStats, StatsSnapshot};
 use crate::error::{AppError, Result};
 
 const SCREEN_SOURCE_NAME: &str = "screen-source";
 const VIDEO_QUEUE_NAME: &str = "encode-queue";
+/// Fragment length of the in-progress MP4, in milliseconds.
+const FRAGMENT_DURATION_MS: u32 = 1000;
 /// Standard 90 kHz video clock.
 const VIDEO_TIMESCALE: u32 = 90_000;
 
@@ -84,6 +87,7 @@ pub enum PipelineEvent {
 
 pub struct RecordingPipeline {
     pipeline: gst::Pipeline,
+    stats: Arc<PipelineStats>,
     resolution: Arc<Mutex<Option<(u32, u32)>>>,
     finishing: Arc<AtomicBool>,
     has_audio: bool,
@@ -138,16 +142,11 @@ impl RecordingPipeline {
         let parse = make("h264parse", "parse")?;
 
         let mux = make("mp4mux", "mux")?;
-        // Keep the index at the start of the file and refresh it every 10 s:
-        // if the app crashes the MP4 is still playable up to that point.
-        mux.set_property(
-            "reserved-max-duration",
-            gst::ClockTime::from_seconds(4 * 3600).nseconds(),
-        );
-        mux.set_property(
-            "reserved-moov-update-period",
-            gst::ClockTime::from_seconds(10).nseconds(),
-        );
+        // Fragmented MP4: every second is a self-contained fragment, so the
+        // file stays playable if the app dies, without the ~8 MB per track
+        // of padding a reserved index costs. `remux` turns it into a regular
+        // faststart MP4 once recording ends.
+        mux.set_property("fragment-duration", FRAGMENT_DURATION_MS);
 
         let sink = make("filesink", "sink")?;
         sink.set_property("location", config.output.to_string_lossy().as_ref());
@@ -207,6 +206,9 @@ impl RecordingPipeline {
             _ => false,
         };
 
+        let stats = Arc::new(PipelineStats::default());
+        stats.attach(&queue, &encoder)?;
+
         let resolution = Arc::new(Mutex::new(None));
         install_size_lock(
             &source,
@@ -234,6 +236,7 @@ impl RecordingPipeline {
 
         Ok(Self {
             pipeline,
+            stats,
             resolution,
             finishing,
             has_audio,
@@ -310,6 +313,11 @@ impl RecordingPipeline {
 
     pub fn has_audio(&self) -> bool {
         self.has_audio
+    }
+
+    /// Frames captured/encoded/dropped and encoding latency so far.
+    pub fn stats(&self) -> StatsSnapshot {
+        self.stats.snapshot()
     }
 
     pub fn has_camera(&self) -> bool {

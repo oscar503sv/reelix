@@ -74,8 +74,10 @@ El `libva-intel-media-driver` de Fedora **no incluye codificación H.264**
 con la GPU Intel instala la versión de RPM Fusion:
 
 ```bash
-sudo dnf install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm
+# intel-media-driver está en RPM Fusion *nonfree* (no en free)
+sudo dnf install https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
 sudo dnf swap libva-intel-media-driver intel-media-driver --allowerasing
+rm -rf ~/.cache/gstreamer-1.0    # que GStreamer vuelva a detectar los encoders
 vainfo | grep -i "H264.*Enc"     # debe listar VAEntrypointEncSliceLP
 gst-inspect-1.0 vah264lpenc      # debe existir
 ```
