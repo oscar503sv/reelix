@@ -1,6 +1,7 @@
-//! Media sources. Phase 1 only has the screen; microphone and camera land
-//! in phases 2 and 3.
+//! Media sources: screen (portal + PipeWire) and audio (PipeWire via the
+//! PulseAudio protocol). The camera lands in phase 3.
 
+pub mod audio;
 pub mod portal;
 
 pub use portal::{CaptureRequest, ScreenCastSession, SourceKind};

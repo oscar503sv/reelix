@@ -6,7 +6,7 @@
 sudo dnf install rust cargo gcc pkgconf-pkg-config \
     gtk4-devel libadwaita-devel gstreamer1-devel gstreamer1-plugins-base-devel \
     pipewire-gstreamer gstreamer1-plugins-good gstreamer1-plugins-bad-free \
-    gstreamer1-plugin-openh264
+    gstreamer1-plugin-openh264 fdk-aac-free pipewire-pulseaudio
 ```
 
 Rust stable ≥ 1.85 (edición 2024).
@@ -33,6 +33,11 @@ Tests:
   renombrar, borrar, metadatos corruptos).
 - `tests/encoding.rs`: codifica un clip real con el encoder detectado y lo
   valida con `qtdemux`. Se omite si GStreamer no está disponible.
+- `tests/recording_pipeline.rs`: ejecuta el `RecordingPipeline` de
+  producción con fuentes de prueba en vivo (vídeo + dos de audio): parada por
+  EOS, duraciones de audio/vídeo alineadas, pista estéreo, mensajes de nivel
+  y que una mezcla a +6 dBFS sale limitada por debajo de 0 dBFS. Cada test usa
+  su propio `glib::MainContext` (los tests corren en paralelo).
 
 La captura vía portal no se puede automatizar (GNOME siempre pide
 confirmación), así que la prueba funcional es manual:
@@ -42,6 +47,11 @@ confirmación), así que la prueba funcional es manual:
 3. Comprobar: `ffprobe ~/Vídeos/Reelix/recording-*.mp4` y que
    `ffmpeg -v error -i <archivo> -f null -` no muestra errores.
 4. Repetir con una ventana, y deteniendo desde el indicador de GNOME.
+5. Audio: grabar hablando y con música sonando ("Audio del sistema"
+   activado). Comprobar con
+   `ffprobe -show_entries stream=codec_type,channels,start_time,duration`
+   que hay pista AAC estéreo alineada con el vídeo, y escuchar que la voz
+   coincide con la imagen.
 
 ## Instalación local
 

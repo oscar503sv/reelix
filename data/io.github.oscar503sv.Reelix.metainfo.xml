@@ -13,8 +13,9 @@
     <p>
       Reelix is a lightweight, local-first screen recorder built for GNOME and
       Wayland. It uses the XDG Desktop Portal and PipeWire to capture your
-      screen or a single window and GStreamer to encode MP4 files, with
-      hardware acceleration when available.
+      screen or a single window, together with your microphone and system
+      audio, and GStreamer to encode MP4 files, with hardware acceleration
+      when available.
     </p>
     <p>Your recordings never leave your computer. There is no account, no cloud and no telemetry.</p>
   </description>
@@ -30,6 +31,11 @@
     <control>pointing</control>
   </supports>
   <releases>
+    <release version="0.2.0" date="2026-10-22">
+      <description>
+        <p>Phase 2: record the microphone and system audio (mixed, with a level meter and a limiter) into the MP4 as AAC.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-10-22">
       <description>
         <p>Phase 1 proof of concept: record a screen or window to MP4 through the ScreenCast portal.</p>

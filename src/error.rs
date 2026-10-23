@@ -27,6 +27,9 @@ pub enum AppError {
     #[error("no usable H.264 encoder found (tried: {0})")]
     NoEncoder(String),
 
+    #[error("no usable AAC encoder found (tried: {0})")]
+    NoAudioEncoder(String),
+
     #[error("failed to build pipeline: {0}")]
     Pipeline(String),
 
@@ -93,6 +96,12 @@ impl AppError {
                 "No hay codificador de vídeo disponible".into(),
                 "Instala gstreamer1-plugin-openh264 o, para aceleración por hardware \
                  en Intel, intel-media-driver de RPM Fusion."
+                    .into(),
+            ),
+            Self::NoAudioEncoder(_) => (
+                "No hay codificador de audio disponible".into(),
+                "Instala fdk-aac-free y gstreamer1-plugins-bad-free, o \
+                 gstreamer1-plugin-libav."
                     .into(),
             ),
             Self::Pipeline(_) | Self::Streaming { .. } => (

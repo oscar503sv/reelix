@@ -1,5 +1,6 @@
 //! GTK4/libadwaita front end.
 
+mod audio_panel;
 mod main_window;
 
 use std::rc::Rc;

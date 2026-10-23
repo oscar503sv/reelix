@@ -1,8 +1,9 @@
+pub mod audio;
 pub mod encoder;
 pub mod pipeline;
 
 pub use encoder::EncoderKind;
-pub use pipeline::{PipelineConfig, PipelineEvent, RecordingPipeline};
+pub use pipeline::{AudioConfig, PipelineConfig, PipelineEvent, RecordingPipeline, VideoInput};
 
 /// Initializes GStreamer. Idempotent and cheap after the first call; every
 /// entry point that touches GStreamer goes through here.

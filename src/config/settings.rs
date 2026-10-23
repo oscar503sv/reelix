@@ -59,6 +59,29 @@ impl Default for VideoSettings {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AudioSettings {
+    pub microphone: bool,
+    /// PipeWire `node.name` of the microphone; `None` follows the system default.
+    pub microphone_device: Option<String>,
+    /// Linear gain applied to the microphone (1.0 = unchanged).
+    pub microphone_volume: f64,
+    /// Also record what the speakers play (monitor of the default output).
+    pub system_audio: bool,
+}
+
+impl Default for AudioSettings {
+    fn default() -> Self {
+        Self {
+            microphone: true,
+            microphone_device: None,
+            microphone_volume: 1.0,
+            system_audio: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct StorageSettings {
@@ -70,16 +93,32 @@ pub struct StorageSettings {
 #[serde(default)]
 pub struct Settings {
     pub video: VideoSettings,
+    pub audio: AudioSettings,
     pub storage: StorageSettings,
 }
 
 impl Settings {
     pub const MIN_FPS: u32 = 5;
     pub const MAX_FPS: u32 = 60;
+    pub const MAX_VOLUME: f64 = 4.0;
 
     /// Clamps values a user could have hand-edited into nonsense.
     pub fn sanitized(mut self) -> Self {
         self.video.fps = self.video.fps.clamp(Self::MIN_FPS, Self::MAX_FPS);
+        let volume = self.audio.microphone_volume;
+        self.audio.microphone_volume = if volume.is_finite() {
+            volume.clamp(0.0, Self::MAX_VOLUME)
+        } else {
+            1.0
+        };
+        if self
+            .audio
+            .microphone_device
+            .as_ref()
+            .is_some_and(|d| d.trim().is_empty())
+        {
+            self.audio.microphone_device = None;
+        }
         self
     }
 
@@ -128,6 +167,15 @@ impl Settings {
         fs::write(path, text).map_err(|e| AppError::io(path, e))
     }
 
+    /// Saves to the default location.
+    pub fn save(&self) -> Result<()> {
+        let path = Self::default_path().ok_or_else(|| AppError::Config {
+            path: PathBuf::from("~/.config"),
+            message: "no config directory available".into(),
+        })?;
+        self.save_to(&path)
+    }
+
     /// Directory where recordings are stored.
     pub fn recording_dir(&self) -> PathBuf {
         if let Some(dir) = &self.storage.recording_dir {
@@ -173,6 +221,47 @@ mod tests {
         let mut s = Settings::default();
         s.storage.recording_dir = Some(PathBuf::from("/data/rec"));
         assert_eq!(s.recording_dir(), PathBuf::from("/data/rec"));
+    }
+
+    #[test]
+    fn audio_defaults_record_default_microphone_only() {
+        let a = Settings::default().audio;
+        assert!(a.microphone);
+        assert!(a.microphone_device.is_none());
+        assert!(!a.system_audio);
+        assert_eq!(a.microphone_volume, 1.0);
+    }
+
+    #[test]
+    fn audio_values_are_sanitized() {
+        let s: Settings =
+            toml::from_str("[audio]\nmicrophone_volume = 9.0\nmicrophone_device = \"  \"\n")
+                .expect("valid toml");
+        let s = s.sanitized();
+        assert_eq!(s.audio.microphone_volume, Settings::MAX_VOLUME);
+        assert!(s.audio.microphone_device.is_none());
+    }
+
+    #[test]
+    fn save_and_load_roundtrip() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("nested/settings.toml");
+        let mut s = Settings::default();
+        s.audio.system_audio = true;
+        s.audio.microphone_device = Some("alsa_input.test".into());
+        s.save_to(&path).expect("save");
+        assert_eq!(Settings::load_from(&path).expect("load"), s);
+    }
+
+    #[test]
+    fn corrupt_file_is_reported() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("settings.toml");
+        std::fs::write(&path, "video = [").expect("write");
+        assert!(matches!(
+            Settings::load_from(&path),
+            Err(AppError::Config { .. })
+        ));
     }
 
     #[test]

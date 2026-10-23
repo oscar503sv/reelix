@@ -1,4 +1,5 @@
-//! Main window: record button, live timer, recent recordings.
+//! Main window: record button, live timer and audio meter, audio options,
+//! recent recordings.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -7,6 +8,7 @@ use std::time::Duration;
 use adw::prelude::*;
 use gtk::{gio, glib};
 
+use super::audio_panel::AudioPanel;
 use crate::app::{Controller, ControllerObserver, RecorderState};
 use crate::branding;
 use crate::error::AppError;
@@ -22,6 +24,8 @@ pub struct MainWindow {
     record_button: gtk::Button,
     stop_button: gtk::Button,
     timer_label: gtk::Label,
+    level_bar: gtk::LevelBar,
+    audio_panel: AudioPanel,
     recent_group: adw::PreferencesGroup,
     recent_rows: RefCell<Vec<adw::ActionRow>>,
     timer_source: RefCell<Option<glib::SourceId>>,
@@ -48,8 +52,22 @@ impl MainWindow {
             .visible(false)
             .build();
 
+        let level_bar = gtk::LevelBar::builder()
+            .min_value(0.0)
+            .max_value(1.0)
+            .width_request(200)
+            .halign(gtk::Align::Center)
+            .tooltip_text("Nivel del micrófono")
+            .visible(false)
+            .build();
+        // Plain meter: no "low/high/full" color offsets.
+        for name in ["low", "high", "full"] {
+            level_bar.remove_offset_value(Some(name));
+        }
+
         let buttons = gtk::Box::new(gtk::Orientation::Vertical, 12);
         buttons.append(&timer_label);
+        buttons.append(&level_bar);
         buttons.append(&record_button);
         buttons.append(&stop_button);
 
@@ -72,6 +90,11 @@ impl MainWindow {
             .build();
         recent_group.set_header_suffix(Some(&open_folder));
 
+        let audio_panel = AudioPanel::new(&controller);
+        let groups = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        groups.append(audio_panel.widget());
+        groups.append(&recent_group);
+
         let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
         content.append(&status);
         let clamp = adw::Clamp::builder()
@@ -79,7 +102,7 @@ impl MainWindow {
             .margin_start(12)
             .margin_end(12)
             .margin_bottom(24)
-            .child(&recent_group)
+            .child(&groups)
             .build();
         content.append(&clamp);
 
@@ -132,6 +155,8 @@ impl MainWindow {
             record_button,
             stop_button,
             timer_label,
+            level_bar,
+            audio_panel,
             recent_group,
             recent_rows: RefCell::new(Vec::new()),
             timer_source: RefCell::new(None),
@@ -239,6 +264,11 @@ impl MainWindow {
         self.record_button.set_sensitive(!state.is_busy());
         self.stop_button.set_visible(capturing);
         self.timer_label.set_visible(capturing);
+        if !capturing {
+            self.level_bar.set_visible(false);
+            self.level_bar.set_value(0.0);
+        }
+        self.audio_panel.set_sensitive(!state.is_busy());
         self.set_inhibited(capturing);
 
         let (icon, title, description) = match state {
@@ -331,6 +361,20 @@ impl ControllerObserver for WindowObserver {
         dialog.add_response("ok", "Aceptar");
         this.window.present();
         dialog.present(Some(&this.window));
+    }
+
+    fn notice(&self, message: &str) {
+        self.0
+            .toasts
+            .add_toast(adw::Toast::builder().title(message).timeout(6).build());
+    }
+
+    fn audio_level(&self, level: f64) {
+        let bar = &self.0.level_bar;
+        if !bar.is_visible() && self.0.controller.state().is_capturing() {
+            bar.set_visible(true);
+        }
+        bar.set_value(level);
     }
 }
 

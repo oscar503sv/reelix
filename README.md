@@ -9,15 +9,20 @@ ScreenCast de XDG, PipeWire y GStreamer.
 - Ligero: el procesamiento de vídeo lo hace GStreamer (C, multihilo); Rust
   coordina, gestiona estado y UI.
 
-> Estado: **Fase 1 (Proof of Concept) completada.** Graba pantalla o ventana
-> a MP4/H.264. Audio (Fase 2), cámara (Fase 3) y UX completa (Fase 4) están
-> pendientes. Ver [Hoja de ruta](#hoja-de-ruta).
+> Estado: **Fase 2 (audio) completada.** Graba pantalla o ventana con
+> micrófono y/o audio del sistema a MP4 (H.264 + AAC). Cámara (Fase 3) y UX
+> completa (Fase 4) están pendientes. Ver [Hoja de ruta](#hoja-de-ruta).
 
-## Qué hace (Fase 1)
+## Qué hace
 
 - Botón **Grabar pantalla** → selector nativo de GNOME (pantalla o ventana).
-- Graba a `~/Vídeos/Reelix/recording-AAAA-MM-DD-HHMMSS.mp4` (H.264) más un
-  `.json` con metadatos (título, fecha, duración, resolución, fps, encoder).
+- Graba a `~/Vídeos/Reelix/recording-AAAA-MM-DD-HHMMSS.mp4` (H.264 + AAC)
+  más un `.json` con metadatos (título, fecha, duración, resolución, fps,
+  audio, encoder).
+- **Micrófono** (predeterminado o uno concreto) y **audio del sistema** (lo
+  que suena en los altavoces), por separado o mezclados, con medidor de nivel
+  en vivo. Al mezclar, el audio del sistema se baja al 60 % para que la voz
+  se entienda, y un limitador evita la saturación.
 - Cronómetro en vivo, botón **Detener**, **Esc** cancela y descarta.
 - Detener desde el indicador "compartiendo pantalla" de GNOME también
   finaliza el archivo correctamente.
@@ -34,8 +39,8 @@ GStreamer 1.28, PipeWire 1.6).
 Ejecución (en Fedora Workstation casi todo viene preinstalado):
 
 ```bash
-sudo dnf install pipewire-gstreamer gstreamer1-plugins-good \
-    gstreamer1-plugins-bad-free gstreamer1-plugin-openh264 \
+sudo dnf install pipewire-gstreamer pipewire-pulseaudio gstreamer1-plugins-good \
+    gstreamer1-plugins-bad-free gstreamer1-plugin-openh264 fdk-aac-free \
     xdg-desktop-portal xdg-desktop-portal-gnome
 ```
 
@@ -114,6 +119,12 @@ quality = "medium"       # low | medium | high
 encoder = "auto"         # auto | hardware | software
 show_cursor = true
 
+[audio]
+microphone = true
+# microphone_device = "alsa_input.…"   # node.name; ver `wpctl status` / `pw-cli ls Node`
+microphone_volume = 1.0  # 0.0–4.0
+system_audio = false
+
 [storage]
 # recording_dir = "/home/usuario/Vídeos/Reelix"
 ```
@@ -126,15 +137,19 @@ show_cursor = true
 | "Faltan componentes multimedia" | Falta `pipewire-gstreamer` (`gst-inspect-1.0 pipewiresrc`) u otro plugin. |
 | "No hay codificador de vídeo disponible" | `sudo dnf install gstreamer1-plugin-openh264`. |
 | CPU alta al grabar | Estás usando codificación por software; instala `intel-media-driver` (ver arriba). |
+| Aviso "No se encontró ningún micrófono" | Revisa Configuración → Sonido → Entrada de GNOME y `wpctl status`. La grabación continúa sin micrófono. |
+| La barra de nivel no se mueve | El micrófono está silenciado o con volumen 0 en GNOME, o se eligió otro dispositivo. |
+| El audio del sistema no se graba | Necesita `pipewire-pulseaudio` (capa PulseAudio de PipeWire): `pactl info` debe responder. |
 | Log con `stream error: target not found` al parar | Normal: el portal cerró el stream después de finalizar el archivo. |
 
-Para depurar: `RUST_LOG=reelix=debug GST_DEBUG=pipewiresrc:4,mp4mux:4 reelix`.
+Para depurar: `RUST_LOG=reelix=debug GST_DEBUG=pipewiresrc:4,pulsesrc:4,mp4mux:4 reelix`.
 
 ## Arquitectura
 
 ```
 GTK4/libadwaita (UI) → Controller + máquina de estados → Portal ScreenCast (ashpd)
-   → PipeWire fd → GStreamer: pipewiresrc → videoconvert → encoder H.264 → mp4mux → archivo
+   → PipeWire fd → GStreamer: pipewiresrc → videoconvert → encoder H.264 ─┐
+   micrófono / monitor del sistema → pulsesrc → audiomixer → limitador → AAC ─┴→ mp4mux → archivo
 ```
 
 Detalles y decisiones en [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -142,7 +157,7 @@ Detalles y decisiones en [ARCHITECTURE.md](ARCHITECTURE.md).
 ## Hoja de ruta
 
 - [x] **Fase 1**: GUI → portal → PipeWire → GStreamer → MP4.
-- [ ] **Fase 2**: micrófono (PipeWire) + AAC en el mismo MP4.
+- [x] **Fase 2**: micrófono y audio del sistema (PipeWire) + AAC en el mismo MP4.
 - [ ] **Fase 3**: cámara (portal Camera) + composición en el pipeline.
 - [ ] **Fase 4**: pausa, overlay, countdown, biblioteca completa, settings, atajos globales.
 - [ ] **Fase 5**: medición y optimización (VA-API sin copias, DMA-BUF).

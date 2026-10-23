@@ -1,4 +1,4 @@
-//! GStreamer recording pipeline for a PipeWire screen-cast stream.
+//! GStreamer recording pipeline.
 //!
 //! ```text
 //! pipewiresrc (portal fd + node id)
@@ -6,12 +6,17 @@
 //!   → videoscale + capsfilter (output size fixed to the first negotiated size)
 //!   → videorate max-rate=fps (drop-only: never duplicates frames)
 //!   → queue (leaky, bounded: drops frames instead of growing RAM)
-//!   → H.264 encoder → h264parse → mp4mux → filesink
+//!   → H.264 encoder → h264parse ─┐
+//!                                ├→ mp4mux → filesink
+//!   audio branch (audio.rs) ─────┘
 //! ```
 //!
 //! GNOME delivers frames only on screen damage (plus a keep-alive), so the
 //! output is variable frame rate capped at `fps`. This keeps CPU usage low
 //! on static screens.
+//!
+//! All sources are timestamped against the system clock, so audio and video
+//! share one timeline and cannot drift apart.
 
 use std::os::fd::RawFd;
 use std::path::PathBuf;
@@ -21,19 +26,36 @@ use std::time::Duration;
 
 use gst::prelude::*;
 
+use super::audio::{self, AacEncoderKind, AudioInput};
 use super::encoder::{EncoderKind, target_bitrate};
 use crate::error::{AppError, Result};
 
-const SOURCE_NAME: &str = "screen-source";
-const QUEUE_NAME: &str = "encode-queue";
+const SCREEN_SOURCE_NAME: &str = "screen-source";
+const VIDEO_QUEUE_NAME: &str = "encode-queue";
+/// Standard 90 kHz video clock.
+const VIDEO_TIMESCALE: u32 = 90_000;
+
+/// Where video frames come from.
+#[derive(Debug, Clone)]
+pub enum VideoInput {
+    /// A ScreenCast portal stream. `pipewiresrc` dups the fd; the caller
+    /// must keep the original open while building.
+    PipeWire { fd: RawFd, node_id: u32 },
+    /// Any live element producing raw video (tests, future sources).
+    Element(gst::Element),
+}
+
+#[derive(Debug, Clone)]
+pub struct AudioConfig {
+    pub inputs: Vec<AudioInput>,
+    pub encoder: AacEncoderKind,
+}
 
 /// Settings needed to build a pipeline.
 #[derive(Debug, Clone)]
 pub struct PipelineConfig {
-    /// PipeWire remote fd from the ScreenCast portal. `pipewiresrc` dups it;
-    /// the caller must keep the original open while building.
-    pub pipewire_fd: RawFd,
-    pub node_id: u32,
+    pub video: VideoInput,
+    pub audio: Option<AudioConfig>,
     pub output: PathBuf,
     pub fps: u32,
     pub bits_per_pixel: f64,
@@ -45,9 +67,13 @@ pub struct PipelineConfig {
 pub enum PipelineEvent {
     /// Pipeline reached PLAYING.
     Started,
-    /// The capture source disappeared (e.g. the user stopped sharing from
+    /// A capture source disappeared (e.g. the user stopped sharing from
     /// GNOME's top bar). The pipeline is finalizing what it has.
-    SourceLost,
+    SourceLost {
+        source: String,
+    },
+    /// Microphone loudness, 0.0–1.0, roughly every 100 ms.
+    AudioLevel(f64),
     /// EOS reached the sink: the MP4 file is complete.
     Finalized,
     Error(AppError),
@@ -57,6 +83,7 @@ pub struct RecordingPipeline {
     pipeline: gst::Pipeline,
     resolution: Arc<Mutex<Option<(u32, u32)>>>,
     finishing: Arc<AtomicBool>,
+    has_audio: bool,
     _bus_watch: gst::bus::BusWatchGuard,
 }
 
@@ -70,14 +97,10 @@ impl RecordingPipeline {
         super::init()?;
 
         let pipeline = gst::Pipeline::with_name("reelix-recording");
+        pipeline.use_clock(Some(&gst::SystemClock::obtain()));
         let format = config.encoder.preferred_format();
 
-        let source = make("pipewiresrc", SOURCE_NAME)?;
-        source.set_property("fd", config.pipewire_fd);
-        source.set_property("path", config.node_id.to_string());
-        // Same settings GNOME Shell's built-in recorder uses.
-        source.set_property("do-timestamp", true);
-        source.set_property("keepalive-time", 1000i32);
+        let source = make_video_source(&config.video)?;
 
         let convert = make("videoconvert", "convert")?;
         convert.set_property_from_str("chroma-mode", "none");
@@ -100,7 +123,7 @@ impl RecordingPipeline {
         rate.set_property("max-rate", i32::try_from(config.fps).unwrap_or(30));
         rate.set_property("skip-to-first", true);
 
-        let queue = make("queue", QUEUE_NAME)?;
+        let queue = make("queue", VIDEO_QUEUE_NAME)?;
         queue.set_property("max-size-buffers", 5u32);
         queue.set_property("max-size-bytes", 0u32);
         queue.set_property("max-size-time", 0u64);
@@ -141,6 +164,25 @@ impl RecordingPipeline {
             .add_many(chain)
             .map_err(|e| AppError::Pipeline(e.to_string()))?;
         gst::Element::link_many(chain).map_err(|e| AppError::Pipeline(e.to_string()))?;
+        // Variable frame rate timestamps need a fine timescale; the automatic
+        // one is derived from the (absent) frame rate and loses precision.
+        if let Some(mux_pad) = parse.static_pad("src").and_then(|p| p.peer()) {
+            mux_pad.set_property("trak-timescale", VIDEO_TIMESCALE);
+        }
+
+        let mut capture_sources = vec![SCREEN_SOURCE_NAME.to_owned()];
+        let has_audio = match &config.audio {
+            Some(audio_config) if !audio_config.inputs.is_empty() => {
+                capture_sources.extend(audio::build_branch(
+                    &pipeline,
+                    &audio_config.inputs,
+                    audio_config.encoder,
+                    &mux,
+                )?);
+                true
+            }
+            _ => false,
+        };
 
         let resolution = Arc::new(Mutex::new(None));
         install_size_lock(
@@ -153,11 +195,12 @@ impl RecordingPipeline {
         )?;
 
         let finishing = Arc::new(AtomicBool::new(false));
-        let bus_watch = install_bus_watch(&pipeline, Arc::clone(&finishing), on_event)?;
+        let bus_watch =
+            install_bus_watch(&pipeline, Arc::clone(&finishing), capture_sources, on_event)?;
 
         tracing::info!(
             encoder = %config.encoder,
-            node_id = config.node_id,
+            audio = has_audio,
             output = %config.output.display(),
             "recording pipeline built"
         );
@@ -166,6 +209,7 @@ impl RecordingPipeline {
             pipeline,
             resolution,
             finishing,
+            has_audio,
             _bus_watch: bus_watch,
         })
     }
@@ -188,6 +232,10 @@ impl RecordingPipeline {
         if let Err(e) = self.pipeline.set_state(gst::State::Null) {
             tracing::warn!(error = %e, "failed to stop pipeline");
         }
+    }
+
+    pub fn has_audio(&self) -> bool {
+        self.has_audio
     }
 
     /// Output resolution, once the first frame has been negotiated.
@@ -216,33 +264,53 @@ fn make(factory: &str, name: &str) -> Result<gst::Element> {
         .map_err(|_| AppError::MissingElement(factory.to_owned()))
 }
 
+fn make_video_source(input: &VideoInput) -> Result<gst::Element> {
+    match input {
+        VideoInput::PipeWire { fd, node_id } => {
+            let source = make("pipewiresrc", SCREEN_SOURCE_NAME)?;
+            source.set_property("fd", *fd);
+            source.set_property("path", node_id.to_string());
+            // Same settings GNOME Shell's built-in recorder uses.
+            source.set_property("do-timestamp", true);
+            source.set_property("keepalive-time", 1000i32);
+            Ok(source)
+        }
+        VideoInput::Element(element) => {
+            element.set_property("name", SCREEN_SOURCE_NAME);
+            Ok(element.clone())
+        }
+    }
+}
+
 fn conversion_threads() -> u32 {
     std::thread::available_parallelism()
         .map(|n| u32::try_from(n.get()).unwrap_or(1).min(4))
         .unwrap_or(1)
 }
 
-/// Pushes EOS into the encode queue rather than into the source. This works
-/// whether the source is healthy or has just failed, because EOS travels
-/// downstream from the queue to the muxer regardless of upstream state.
+/// Pushes EOS into each branch's encode queue rather than into the sources.
+/// This works whether the sources are healthy or have just failed, because
+/// EOS travels downstream from the queues to the muxer regardless of
+/// upstream state. The muxer finalizes once every branch has seen EOS.
 fn request_finish(pipeline: &gst::Pipeline, finishing: &AtomicBool) {
     if finishing.swap(true, Ordering::SeqCst) {
         return;
     }
     tracing::info!("finalizing recording");
-    let pad = pipeline
-        .by_name(QUEUE_NAME)
-        .and_then(|q| q.static_pad("sink"));
-    match pad {
-        Some(pad) => {
-            if !pad.send_event(gst::event::Eos::new()) {
-                tracing::warn!("queue rejected EOS; sending it to the pipeline");
-                pipeline.send_event(gst::event::Eos::new());
-            }
+    let mut delivered = false;
+    for name in [VIDEO_QUEUE_NAME, audio::AUDIO_QUEUE_NAME] {
+        let Some(pad) = pipeline.by_name(name).and_then(|q| q.static_pad("sink")) else {
+            continue;
+        };
+        if pad.send_event(gst::event::Eos::new()) {
+            delivered = true;
+        } else {
+            tracing::warn!(queue = name, "queue rejected EOS");
         }
-        None => {
-            pipeline.send_event(gst::event::Eos::new());
-        }
+    }
+    if !delivered {
+        tracing::warn!("no queue accepted EOS; sending it to the pipeline");
+        pipeline.send_event(gst::event::Eos::new());
     }
 }
 
@@ -261,7 +329,7 @@ fn install_size_lock(
 ) -> Result<()> {
     let pad = source
         .static_pad("src")
-        .ok_or_else(|| AppError::Pipeline("pipewiresrc has no src pad".into()))?;
+        .ok_or_else(|| AppError::Pipeline("video source has no src pad".into()))?;
     let size_filter = size_filter.downgrade();
     let encoder = encoder.downgrade();
     let (kind, fps, bpp) = (config.encoder, config.fps, config.bits_per_pixel);
@@ -287,7 +355,7 @@ fn install_size_lock(
         };
         let even = |v: i32| (u32::try_from(v).unwrap_or(2).max(2)) & !1;
         let (w, h) = (even(w), even(h));
-        tracing::info!(width = w, height = h, caps = %caps_event.caps(), "screen stream negotiated");
+        tracing::info!(width = w, height = h, caps = %caps_event.caps(), "video stream negotiated");
 
         if let Some(filter) = size_filter.upgrade() {
             filter.set_property(
@@ -313,6 +381,7 @@ fn install_size_lock(
 fn install_bus_watch(
     pipeline: &gst::Pipeline,
     finishing: Arc<AtomicBool>,
+    capture_sources: Vec<String>,
     on_event: impl Fn(PipelineEvent) + 'static,
 ) -> Result<gst::bus::BusWatchGuard> {
     let bus = pipeline
@@ -320,7 +389,6 @@ fn install_bus_watch(
         .ok_or_else(|| AppError::Pipeline("pipeline has no bus".into()))?;
     let weak_pipeline = pipeline.downgrade();
     let mut started = false;
-    let mut source_lost = false;
 
     bus.add_watch_local(move |_, msg| {
         use gst::MessageView;
@@ -336,6 +404,16 @@ fn install_bus_watch(
                 started = true;
                 on_event(PipelineEvent::Started);
             }
+            MessageView::Element(element) => {
+                let from_meter = msg.src().is_some_and(|s| s.name() == audio::LEVEL_NAME);
+                if let Some(level) = element
+                    .structure()
+                    .filter(|_| from_meter)
+                    .and_then(audio::parse_level)
+                {
+                    on_event(PipelineEvent::AudioLevel(level));
+                }
+            }
             MessageView::Eos(_) => {
                 tracing::info!("EOS reached sink; recording finalized");
                 on_event(PipelineEvent::Finalized);
@@ -343,15 +421,19 @@ fn install_bus_watch(
             MessageView::Error(err) => {
                 let src_name = msg.src().map(|s| s.name().to_string()).unwrap_or_default();
                 let details = err.debug().map(|d| d.to_string()).unwrap_or_default();
-                // A failing source while recording almost always means the
-                // screen cast was revoked; keep what we have instead of
-                // failing the whole recording.
-                if src_name == SOURCE_NAME && started && !source_lost {
-                    tracing::warn!(error = %err.error(), %details, "screen source lost; finalizing");
-                    source_lost = true;
+                let is_capture_source = capture_sources.contains(&src_name);
+                if is_capture_source && finishing.load(Ordering::SeqCst) {
+                    // Sources commonly complain once they are being shut
+                    // down (e.g. "target not found" after the portal closes).
+                    tracing::debug!(source = %src_name, error = %err.error(), "ignoring source error while finalizing");
+                } else if is_capture_source && started {
+                    // A failing source mid-recording almost always means the
+                    // screen cast was revoked or a device vanished; keep what
+                    // we have instead of failing the whole recording.
+                    tracing::warn!(source = %src_name, error = %err.error(), %details, "capture source lost; finalizing");
                     request_finish(&pipeline, &finishing);
-                    on_event(PipelineEvent::SourceLost);
-                } else if src_name != SOURCE_NAME || !source_lost {
+                    on_event(PipelineEvent::SourceLost { source: src_name });
+                } else {
                     tracing::error!(source = %src_name, error = %err.error(), %details, "pipeline error");
                     on_event(PipelineEvent::Error(AppError::Streaming {
                         source_element: src_name,

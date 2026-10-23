@@ -11,10 +11,13 @@ use chrono::{DateTime, Local};
 use gtk::glib;
 
 use super::state::{RecorderEvent, RecorderState};
-use crate::capture::{CaptureRequest, ScreenCastSession, SourceKind};
+use crate::capture::{CaptureRequest, ScreenCastSession, SourceKind, audio as audio_capture};
 use crate::config::Settings;
 use crate::error::AppError;
-use crate::recording::{EncoderKind, PipelineConfig, PipelineEvent, RecordingPipeline};
+use crate::recording::audio::{AacEncoderKind, AudioInput, AudioSourceElement};
+use crate::recording::{
+    AudioConfig, EncoderKind, PipelineConfig, PipelineEvent, RecordingPipeline, VideoInput,
+};
 use crate::storage::{Library, RecordingMetadata, naming};
 
 /// If EOS has not reached the muxer after this long, tear down anyway. The
@@ -25,6 +28,11 @@ const FINALIZE_TIMEOUT: Duration = Duration::from_secs(10);
 pub trait ControllerObserver {
     fn state_changed(&self, state: &RecorderState);
     fn error(&self, error: &AppError);
+    /// Non-fatal information the user should see (e.g. "recording without
+    /// microphone").
+    fn notice(&self, _message: &str) {}
+    /// Microphone loudness, 0.0–1.0.
+    fn audio_level(&self, _level: f64) {}
 }
 
 struct ActiveRecording {
@@ -63,6 +71,22 @@ impl Controller {
 
     pub fn state(&self) -> RecorderState {
         self.state.borrow().clone()
+    }
+
+    pub fn settings(&self) -> Settings {
+        self.settings.borrow().clone()
+    }
+
+    /// Changes settings and persists them. Applies to the next recording.
+    pub fn update_settings(&self, change: impl FnOnce(&mut Settings)) {
+        let updated = {
+            let mut settings = self.settings.borrow_mut();
+            change(&mut settings);
+            settings.clone()
+        };
+        if let Err(e) = updated.save() {
+            tracing::error!(error = %e, "failed to save settings");
+        }
     }
 
     pub fn library(&self) -> Library {
@@ -156,9 +180,14 @@ impl Controller {
         let started_at = Local::now();
         let output = self.library().new_recording_path(&started_at)?;
 
+        let audio = self.resolve_audio(&settings);
+
         let config = PipelineConfig {
-            pipewire_fd: session.pipewire_fd(),
-            node_id: session.node_id(),
+            video: VideoInput::PipeWire {
+                fd: session.pipewire_fd(),
+                node_id: session.node_id(),
+            },
+            audio,
             output: output.clone(),
             fps: settings.video.fps,
             bits_per_pixel: settings.video.quality.bits_per_pixel(),
@@ -182,6 +211,52 @@ impl Controller {
         })
     }
 
+    /// Turns audio settings into pipeline inputs, degrading gracefully: a
+    /// missing microphone or AAC encoder means recording without audio
+    /// (with a notice), never a failed recording.
+    fn resolve_audio(&self, settings: &Settings) -> Option<AudioConfig> {
+        let mut inputs = audio_capture::plan_inputs(&settings.audio);
+        if settings.audio.microphone {
+            let microphones = audio_capture::list_microphones();
+            tracing::debug!(?microphones, "available microphones");
+            if microphones.is_empty() {
+                tracing::warn!("no microphone found; recording without it");
+                self.notify("No se encontró ningún micrófono: se graba sin él.");
+                inputs.retain(|input| !input.meter);
+            } else if let Some(wanted) = &settings.audio.microphone_device {
+                if !microphones.iter().any(|m| &m.id == wanted) {
+                    tracing::warn!(device = %wanted, "configured microphone missing; using default");
+                    self.notify(
+                        "El micrófono elegido no está conectado: se usa el predeterminado.",
+                    );
+                    for input in inputs.iter_mut().filter(|i| i.meter) {
+                        *input = AudioInput {
+                            source: AudioSourceElement::Pulse { device: None },
+                            ..input.clone()
+                        };
+                    }
+                }
+            }
+        }
+        if inputs.is_empty() {
+            return None;
+        }
+        match AacEncoderKind::detect() {
+            Ok(encoder) => Some(AudioConfig { inputs, encoder }),
+            Err(e) => {
+                tracing::error!(error = %e, "no AAC encoder; recording without audio");
+                self.notify("No hay codificador de audio AAC: se graba sin audio.");
+                None
+            }
+        }
+    }
+
+    fn notify(&self, message: &str) {
+        if let Some(observer) = self.observer() {
+            observer.notice(message);
+        }
+    }
+
     /// Stopping from GNOME's screen-sharing indicator closes the portal
     /// session; treat that as a normal stop.
     fn watch_session_closed(self: &Rc<Self>, session: Rc<ScreenCastSession>, generation: u64) {
@@ -202,7 +277,15 @@ impl Controller {
             PipelineEvent::Started => {
                 self.apply(RecorderEvent::PipelineStarted);
             }
-            PipelineEvent::SourceLost => {
+            PipelineEvent::AudioLevel(level) => {
+                if let Some(observer) = self.observer() {
+                    observer.audio_level(level);
+                }
+            }
+            PipelineEvent::SourceLost { source } => {
+                if source.starts_with(crate::recording::audio::AUDIO_SOURCE_PREFIX) {
+                    self.notify("Se perdió una fuente de audio; se guardó lo grabado.");
+                }
                 if self.state.borrow().is_capturing() {
                     self.apply(RecorderEvent::StopRequested);
                     self.arm_finalize_timeout();
@@ -264,7 +347,7 @@ impl Controller {
                 .resolution()
                 .map(|(w, h)| format!("{w}x{h}")),
             fps: active.fps,
-            audio: false,
+            audio: active.pipeline.has_audio(),
             camera: false,
             encoder: Some(active.encoder.factory_name().to_owned()),
         };

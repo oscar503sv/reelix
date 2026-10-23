@@ -1,3 +1,5 @@
 mod settings;
 
-pub use settings::{EncoderPreference, Quality, Settings, StorageSettings, VideoSettings};
+pub use settings::{
+    AudioSettings, EncoderPreference, Quality, Settings, StorageSettings, VideoSettings,
+};
