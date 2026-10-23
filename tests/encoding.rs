@@ -37,7 +37,7 @@ fn encode_test_clip(kind: EncoderKind, output: &std::path::Path) -> Result<(), S
             .build(),
     );
     let encoder = kind
-        .build(target_bitrate(1280, 720, 30, 0.08), 30)
+        .build(target_bitrate(1280, 720, 30, 0.08), 30, 0.08)
         .map_err(|e| e.to_string())?;
     let parse = make("h264parse")?;
     let mux = make("mp4mux")?;

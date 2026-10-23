@@ -2,6 +2,10 @@
 //! encoder, frames the (leaky) queue had to drop, and per-frame encoding
 //! latency (queue entry → encoder output, matched by timestamp).
 //!
+//! Some encoders shift output timestamps by a constant (e.g. VA-API
+//! encoders, to keep DTS positive); the shift is learnt from the first
+//! encoded frame.
+//!
 //! Frames dropped earlier on purpose (`videorate max-rate`) are not counted:
 //! only frames that reached the encode queue and never got encoded are.
 
@@ -26,6 +30,8 @@ pub struct PipelineStats {
     latency_total_us: AtomicU64,
     latency_max_us: AtomicU64,
     in_flight: Mutex<VecDeque<(u64, Instant)>>,
+    /// Encoder output PTS minus input PTS, learnt from the first frame.
+    pts_shift: Mutex<Option<i128>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -65,6 +71,17 @@ impl PipelineStats {
     pub fn frame_encoded(&self, pts: u64, now: Instant) {
         self.encoded.fetch_add(1, Ordering::Relaxed);
         let Ok(mut in_flight) = self.in_flight.lock() else {
+            return;
+        };
+        let shift = match self.pts_shift.lock() {
+            Ok(mut shift) => *shift.get_or_insert_with(|| {
+                in_flight
+                    .front()
+                    .map_or(0, |&(first, _)| i128::from(pts) - i128::from(first))
+            }),
+            Err(_) => 0,
+        };
+        let Ok(pts) = u64::try_from(i128::from(pts) - shift) else {
             return;
         };
         while let Some(&(queued_pts, queued_at)) = in_flight.front() {
@@ -148,6 +165,23 @@ mod tests {
         assert_eq!(s.max_latency, Duration::from_millis(15));
         assert_eq!(s.avg_latency, Duration::from_millis(10));
         assert!((s.drop_ratio() - 1.0 / 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn constant_encoder_pts_shift_is_compensated() {
+        // VA-API style: outputs are shifted by a large constant.
+        const SHIFT: u64 = 3_600_000_000_000;
+        let stats = PipelineStats::default();
+        let t0 = Instant::now();
+        let ms = |n| t0 + Duration::from_millis(n);
+        for (i, pts) in [100u64, 133, 166].into_iter().enumerate() {
+            stats.frame_queued(pts, ms(i as u64 * 33));
+        }
+        stats.frame_encoded(100 + SHIFT, ms(5));
+        stats.frame_encoded(166 + SHIFT, ms(70)); // 133 was dropped
+        let s = stats.snapshot();
+        assert_eq!((s.encoded, s.dropped), (2, 1));
+        assert_eq!(s.max_latency, Duration::from_millis(5));
     }
 
     #[test]

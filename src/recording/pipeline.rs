@@ -30,6 +30,7 @@ use gst::prelude::*;
 use super::audio::{self, AacEncoderKind, AudioInput};
 use super::camera::{self, CameraInput, CameraLayout};
 use super::encoder::{EncoderKind, target_bitrate};
+use super::props::try_set;
 use super::stats::{PipelineStats, StatsSnapshot};
 use crate::error::{AppError, Result};
 
@@ -37,6 +38,8 @@ const SCREEN_SOURCE_NAME: &str = "screen-source";
 const VIDEO_QUEUE_NAME: &str = "encode-queue";
 /// Fragment length of the in-progress MP4, in milliseconds.
 const FRAGMENT_DURATION_MS: u32 = 1000;
+/// Caps feature of VA-API GPU surfaces.
+const VA_MEMORY: &str = "memory:VAMemory";
 /// Standard 90 kHz video clock.
 const VIDEO_TIMESCALE: u32 = 90_000;
 
@@ -109,23 +112,14 @@ impl RecordingPipeline {
         let format = config.encoder.preferred_format();
 
         let source = make_video_source(&config.video)?;
-
-        let convert = make("videoconvert", "convert")?;
-        convert.set_property_from_str("chroma-mode", "none");
-        convert.set_property_from_str("dither", "none");
-        convert.set_property_from_str("matrix-mode", "output-only");
-        convert.set_property("n-threads", conversion_threads());
-
-        let scale = make("videoscale", "scale")?;
-        scale.set_property("add-borders", true);
+        // With a VA-API encoder, colour conversion and scaling run on the GPU
+        // (vapostproc) and frames reach the encoder as GPU surfaces; otherwise
+        // videoconvert/videoscale do it on the CPU.
+        let gpu = config.encoder.is_hardware() && gst::ElementFactory::find("vapostproc").is_some();
+        let memory = gpu.then_some(VA_MEMORY);
 
         let size_filter = make("capsfilter", "size-filter")?;
-        size_filter.set_property(
-            "caps",
-            gst::Caps::builder("video/x-raw")
-                .field("format", format)
-                .build(),
-        );
+        size_filter.set_property("caps", raw_caps(format, memory, None));
 
         let rate = make("videorate", "rate")?;
         rate.set_property("max-rate", i32::try_from(config.fps).unwrap_or(30));
@@ -138,7 +132,9 @@ impl RecordingPipeline {
         queue.set_property_from_str("leaky", "downstream");
 
         let initial_bitrate = target_bitrate(1920, 1080, config.fps, config.bits_per_pixel);
-        let encoder = config.encoder.build(initial_bitrate, config.fps)?;
+        let encoder = config
+            .encoder
+            .build(initial_bitrate, config.fps, config.bits_per_pixel)?;
         let parse = make("h264parse", "parse")?;
 
         let mux = make("mp4mux", "mux")?;
@@ -154,38 +150,45 @@ impl RecordingPipeline {
         let mut capture_sources = vec![SCREEN_SOURCE_NAME.to_owned()];
         let composition = match &config.camera {
             Some(input) => {
-                let composition = camera::build(&pipeline, input, config.fps)?;
+                let composition = camera::build(&pipeline, input, config.fps, gpu)?;
                 capture_sources.push(camera::CAMERA_SOURCE_NAME.to_owned());
                 Some((composition, input.layout))
             }
             None => None,
         };
 
-        let chain = [
-            &convert,
-            &scale,
-            &size_filter,
-            &rate,
-            &queue,
-            &encoder,
-            &parse,
-            &mux,
-            &sink,
-        ];
+        let mut chain: Vec<gst::Element> = if gpu {
+            let postproc = make("vapostproc", "postproc")?;
+            try_set(&postproc, "add-borders", true);
+            vec![rate, postproc, size_filter.clone(), queue.clone()]
+        } else {
+            let convert = make("videoconvert", "convert")?;
+            convert.set_property_from_str("chroma-mode", "none");
+            convert.set_property_from_str("dither", "none");
+            convert.set_property_from_str("matrix-mode", "output-only");
+            convert.set_property("n-threads", conversion_threads());
+            let scale = make("videoscale", "scale")?;
+            scale.set_property("add-borders", true);
+            vec![convert, scale, size_filter.clone(), rate, queue.clone()]
+        };
+        chain.extend([encoder.clone(), parse.clone(), mux.clone(), sink]);
+        let head = chain[0].clone();
+        let chain: Vec<&gst::Element> = chain.iter().collect();
         pipeline
-            .add_many(chain)
+            .add_many(chain.iter().copied())
             .map_err(|e| AppError::Pipeline(e.to_string()))?;
         pipeline
             .add(&source)
             .map_err(|e| AppError::Pipeline(e.to_string()))?;
-        gst::Element::link_many(chain).map_err(|e| AppError::Pipeline(e.to_string()))?;
+        gst::Element::link_many(chain.iter().copied())
+            .map_err(|e| AppError::Pipeline(e.to_string()))?;
         let link_err = |e: gst::glib::BoolError| AppError::Pipeline(e.to_string());
         match &composition {
             Some((comp, _)) => {
                 source.link(&comp.screen_input).map_err(link_err)?;
-                comp.output.link(&convert).map_err(link_err)?;
+                comp.output.link(&head).map_err(link_err)?;
             }
-            None => source.link(&convert).map_err(link_err)?,
+            None => source.link(&head).map_err(link_err)?,
         }
         // Variable frame rate timestamps need a fine timescale; the automatic
         // one is derived from the (absent) frame rate and loses precision.
@@ -216,6 +219,7 @@ impl RecordingPipeline {
             &encoder,
             config,
             format,
+            memory,
             composition
                 .as_ref()
                 .map(|(comp, layout)| (comp.camera_pad.clone(), *layout)),
@@ -228,6 +232,7 @@ impl RecordingPipeline {
 
         tracing::info!(
             encoder = %config.encoder,
+            gpu_conversion = gpu,
             audio = has_audio,
             camera = composition.is_some(),
             output = %config.output.display(),
@@ -368,6 +373,21 @@ fn make_video_source(input: &VideoInput) -> Result<gst::Element> {
     }
 }
 
+/// `video/x-raw[(memory:…)], format=…[, width, height, pixel-aspect-ratio=1/1]`.
+fn raw_caps(format: &str, memory: Option<&str>, size: Option<(u32, u32)>) -> gst::Caps {
+    let mut builder = gst::Caps::builder("video/x-raw").field("format", format);
+    if let Some((w, h)) = size {
+        builder = builder
+            .field("width", i32::try_from(w).unwrap_or(i32::MAX))
+            .field("height", i32::try_from(h).unwrap_or(i32::MAX))
+            .field("pixel-aspect-ratio", gst::Fraction::new(1, 1));
+    }
+    match memory {
+        Some(feature) => builder.features([feature]).build(),
+        None => builder.build(),
+    }
+}
+
 fn conversion_threads() -> u32 {
     std::thread::available_parallelism()
         .map(|n| u32::try_from(n.get()).unwrap_or(1).min(4))
@@ -413,6 +433,7 @@ fn install_size_lock(
     encoder: &gst::Element,
     config: &PipelineConfig,
     format: &'static str,
+    memory: Option<&'static str>,
     bubble: Option<(gst::Pad, CameraLayout)>,
     resolution: Arc<Mutex<Option<(u32, u32)>>>,
 ) -> Result<()> {
@@ -447,15 +468,7 @@ fn install_size_lock(
         tracing::info!(width = w, height = h, caps = %caps_event.caps(), "video stream negotiated");
 
         if let Some(filter) = size_filter.upgrade() {
-            filter.set_property(
-                "caps",
-                gst::Caps::builder("video/x-raw")
-                    .field("format", format)
-                    .field("width", i32::try_from(w).unwrap_or(i32::MAX))
-                    .field("height", i32::try_from(h).unwrap_or(i32::MAX))
-                    .field("pixel-aspect-ratio", gst::Fraction::new(1, 1))
-                    .build(),
-            );
+            filter.set_property("caps", raw_caps(format, memory, Some((w, h))));
         }
         if let Some(enc) = encoder.upgrade() {
             kind.set_bitrate(&enc, target_bitrate(w, h, fps, bpp));

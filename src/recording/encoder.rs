@@ -6,8 +6,7 @@
 
 use std::fmt;
 
-use gst::prelude::*;
-
+use super::props::{try_set, try_set_enum};
 use crate::config::EncoderPreference;
 use crate::error::{AppError, Result};
 
@@ -86,46 +85,73 @@ impl EncoderKind {
     }
 
     /// Sets the target bitrate, converting to the unit each encoder expects.
+    /// Ignored by encoders running in constant-quality mode.
     pub fn set_bitrate(self, element: &gst::Element, bitrate_bps: u32) {
-        match self {
+        let applied = match self {
             // These take kbit/s.
             Self::VaH264Lp | Self::VaH264 | Self::X264 => {
-                element.set_property("bitrate", (bitrate_bps / 1000).max(500));
+                try_set(element, "bitrate", (bitrate_bps / 1000).max(500))
             }
-            Self::OpenH264 => element.set_property("bitrate", bitrate_bps),
+            Self::OpenH264 => try_set(element, "bitrate", bitrate_bps),
+        };
+        if applied {
+            tracing::debug!(encoder = %self, bitrate_bps, "encoder bitrate set");
         }
-        tracing::debug!(encoder = %self, bitrate_bps, "encoder bitrate set");
     }
 
     /// Creates and configures the encoder element for screen content.
-    pub fn build(self, bitrate_bps: u32, fps: u32) -> Result<gst::Element> {
+    /// Every setting is optional: unsupported ones are logged and skipped.
+    pub fn build(self, bitrate_bps: u32, fps: u32, bits_per_pixel: f64) -> Result<gst::Element> {
         let element = gst::ElementFactory::make(self.factory_name())
             .name("encoder")
             .build()
             .map_err(|_| AppError::MissingElement(self.factory_name().into()))?;
-        self.set_bitrate(&element, bitrate_bps);
+        // One keyframe every 2 s keeps seeking snappy.
+        let gop = fps * 2;
 
         match self {
             Self::VaH264Lp | Self::VaH264 => {
-                element.set_property_from_str("rate-control", "vbr");
-                // One keyframe every 2 s keeps seeking snappy.
-                element.set_property("key-int-max", fps * 2);
+                // Intel's low-power encoder only offers constant QP on many
+                // GPUs; use VBR where available, else QP from the quality.
+                if try_set_enum(&element, "rate-control", "vbr") {
+                    self.set_bitrate(&element, bitrate_bps);
+                } else if try_set_enum(&element, "rate-control", "cqp") {
+                    let qp = qp_for(bits_per_pixel);
+                    try_set(&element, "qpi", qp);
+                    try_set(&element, "qpp", qp);
+                    tracing::info!(encoder = %self, qp, "constant-QP rate control");
+                }
+                try_set(&element, "key-int-max", gop);
+                // No reordering: lower latency, and stats match frames by PTS.
+                try_set(&element, "b-frames", 0u32);
             }
             Self::X264 => {
-                element.set_property_from_str("speed-preset", "veryfast");
-                element.set_property_from_str("tune", "zerolatency");
-                element.set_property("key-int-max", fps * 2);
+                self.set_bitrate(&element, bitrate_bps);
+                try_set_enum(&element, "speed-preset", "veryfast");
+                try_set_enum(&element, "tune", "zerolatency");
+                try_set(&element, "key-int-max", gop);
             }
             Self::OpenH264 => {
-                element.set_property_from_str("rate-control", "bitrate");
-                element.set_property_from_str("usage-type", "screen");
-                element.set_property_from_str("complexity", "low");
+                self.set_bitrate(&element, bitrate_bps);
+                try_set_enum(&element, "rate-control", "bitrate");
+                try_set_enum(&element, "usage-type", "screen");
+                try_set_enum(&element, "complexity", "low");
                 // 0 = let openh264 pick based on the number of cores.
-                element.set_property("multi-thread", 0u32);
-                element.set_property("gop-size", fps * 2);
+                try_set(&element, "multi-thread", 0u32);
+                try_set(&element, "gop-size", gop);
             }
         }
         Ok(element)
+    }
+}
+
+/// H.264 quantizer for constant-QP mode from the quality's bits per pixel:
+/// Low (0.04) → 30, Medium (0.08) → 26, High (0.15) → 22.
+pub fn qp_for(bits_per_pixel: f64) -> u32 {
+    match bits_per_pixel {
+        b if b < 0.06 => 30,
+        b if b < 0.12 => 26,
+        _ => 22,
     }
 }
 
@@ -176,6 +202,14 @@ mod tests {
             EncoderKind::choose(EncoderPreference::Auto, |_| false),
             Err(AppError::NoEncoder(_))
         ));
+    }
+
+    #[test]
+    fn qp_follows_quality() {
+        use crate::config::Quality;
+        assert_eq!(qp_for(Quality::Low.bits_per_pixel()), 30);
+        assert_eq!(qp_for(Quality::Medium.bits_per_pixel()), 26);
+        assert_eq!(qp_for(Quality::High.bits_per_pixel()), 22);
     }
 
     #[test]

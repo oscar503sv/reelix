@@ -4,13 +4,14 @@
 //! screen ─→ videoconvert ─→ queue ─────────────────────────────────────┐ sink_0
 //!                                                                       ├→ compositor → …encoder
 //! camera ─→ raw 30 fps → crop (1:1 or 4:3) → [flip] → scale → convert ─┘ sink_1
-//!                                    (circle only: AYUV + alpha mask probe)
+//!                                    (circle only: BGRA + alpha mask probe)
 //! ```
 //!
 //! Shape decides the compositor format, measured on 1080p30 with openh264:
 //! - rectangle: I420 throughout, +8 % CPU over no camera;
-//! - circle: needs per-pixel alpha, so the compositor works in AYUV
-//!   (+28 % CPU). The compositor refuses alpha inputs when it outputs I420.
+//! - circle: needs per-pixel alpha, so the compositor works in BGRA
+//!   (+28 % CPU). The compositor refuses alpha inputs when it outputs I420;
+//!   BGRA (not AYUV) because the GPU converter (vapostproc) accepts it.
 
 use gst::prelude::*;
 
@@ -43,10 +44,15 @@ impl Shape {
         }
     }
 
-    fn compositor_format(self) -> &'static str {
-        match self {
-            Self::Rectangle => "I420",
-            Self::Circle => "AYUV",
+    /// Compositor working format. Circles need per-pixel alpha (BGRA). For
+    /// rectangles, I420 is cheapest when the CPU feeds the encoder, but with
+    /// GPU conversion BGRA is: the screen (BGRx) then needs no CPU
+    /// conversion at all and vapostproc converts on the GPU (rectangle on
+    /// the GPU path: 131 % → 88 % in the benchmark).
+    fn compositor_format(self, gpu_conversion: bool) -> &'static str {
+        match (self, gpu_conversion) {
+            (Self::Rectangle, false) => "I420",
+            _ => "BGRA",
         }
     }
 }
@@ -159,6 +165,8 @@ pub enum AlphaByte {
     /// right whether the consumer reads straight or premultiplied alpha
     /// (fully transparent pixels become all zero, never a "glow").
     Last,
+    /// BGRA/RGBA: alpha last, straight alpha (what `compositor` expects).
+    LastStraight,
 }
 
 /// Writes `mask` into the alpha channel of a packed 4-byte-per-pixel frame.
@@ -171,6 +179,11 @@ pub fn apply_alpha_mask(frame: &mut [u8], mask: &[u8], alpha: AlphaByte) -> bool
         AlphaByte::First => {
             for (pixel, &value) in frame.chunks_exact_mut(4).zip(mask) {
                 pixel[0] = value;
+            }
+        }
+        AlphaByte::LastStraight => {
+            for (pixel, &value) in frame.chunks_exact_mut(4).zip(mask) {
+                pixel[3] = value;
             }
         }
         AlphaByte::Last => {
@@ -289,9 +302,14 @@ pub struct CameraComposition {
 
 /// Builds compositor + camera branch inside `pipeline`. The caller links its
 /// screen source to `screen_input` and `output` to the rest of the chain.
-pub fn build(pipeline: &gst::Pipeline, input: &CameraInput, fps: u32) -> Result<CameraComposition> {
+pub fn build(
+    pipeline: &gst::Pipeline,
+    input: &CameraInput,
+    fps: u32,
+    gpu_conversion: bool,
+) -> Result<CameraComposition> {
     let layout = input.layout;
-    let format = layout.shape.compositor_format();
+    let format = layout.shape.compositor_format(gpu_conversion);
 
     let compositor = make("compositor", COMPOSITOR_NAME)?;
     compositor.set_property_from_str("background", "black");
@@ -491,7 +509,13 @@ pub fn position_bubble(pad: &gst::Pad, layout: &CameraLayout, width: u32, height
 }
 
 fn install_circle_mask(camera_caps: &gst::Element, size: u32) -> Result<()> {
-    install_alpha_mask(camera_caps, circle_mask(size), size, size, AlphaByte::First)
+    install_alpha_mask(
+        camera_caps,
+        circle_mask(size),
+        size,
+        size,
+        AlphaByte::LastStraight,
+    )
 }
 
 /// Applies `mask` (`width`×`height`) to every frame leaving `element`
@@ -758,6 +782,17 @@ mod tests {
             layout,
             AlphaByte::Last
         ));
+    }
+
+    #[test]
+    fn straight_bgra_mask_keeps_colour() {
+        let mut frame = vec![200u8; 2 * 4];
+        assert!(apply_alpha_mask(
+            &mut frame,
+            &[0, 128],
+            AlphaByte::LastStraight
+        ));
+        assert_eq!(frame, [200, 200, 200, 0, 200, 200, 200, 128]);
     }
 
     #[test]

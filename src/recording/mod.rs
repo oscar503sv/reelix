@@ -2,6 +2,7 @@ pub mod audio;
 pub mod camera;
 pub mod encoder;
 pub mod pipeline;
+pub mod props;
 pub mod remux;
 pub mod stats;
 

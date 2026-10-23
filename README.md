@@ -9,10 +9,11 @@ ScreenCast de XDG, PipeWire y GStreamer.
 - Ligero: el procesamiento de vídeo lo hace GStreamer (C, multihilo); Rust
   coordina, gestiona estado y UI.
 
-> Estado: **Fase 4 (UX) completada.** Graba pantalla o ventana con
+> Estado: **Fase 5 (optimización) completada.** Graba pantalla o ventana con
 > micrófono, audio del sistema y cámara a MP4 (H.264 + AAC), con burbuja de
-> cámara, pausa, cuenta atrás, biblioteca y preferencias. Siguiente: Fase 5
-> (optimización). Ver [Hoja de ruta](#hoja-de-ruta).
+> cámara, pausa, cuenta atrás, biblioteca y preferencias. Con aceleración por
+> hardware Intel, grabar cuesta ~3 % de CPU. Siguiente: empaquetado.
+> Ver [Hoja de ruta](#hoja-de-ruta).
 
 ## Qué hace
 
@@ -44,8 +45,9 @@ ScreenCast de XDG, PipeWire y GStreamer.
   finaliza el archivo correctamente.
 - Lista de grabaciones recientes; clic para reproducir.
 - Evita que la sesión se suspenda mientras graba.
-- Si la app se cierra de golpe, el MP4 sigue siendo reproducible hasta los
-  últimos ~10 s (índice MP4 reservado y actualizado periódicamente).
+- Si la app se cierra de golpe, el MP4 sigue siendo reproducible hasta el
+  último segundo (se graba fragmentado y al terminar se convierte, sin
+  recodificar, en un MP4 normal con el índice al principio).
 
 ## Requisitos
 
@@ -70,8 +72,11 @@ sudo dnf install rust cargo gcc gtk4-devel libadwaita-devel \
 ### Aceleración por hardware (Intel, opcional)
 
 El `libva-intel-media-driver` de Fedora **no incluye codificación H.264**
-(por patentes). Sin él, Reelix usa `openh264enc` (software). Para codificar
-con la GPU Intel instala la versión de RPM Fusion:
+(por patentes). Sin él, Reelix usa `openh264enc` (software, ~60 % de un
+núcleo a 1080p30). Con la versión de RPM Fusion, la GPU codifica **y**
+convierte el color (`vah264lpenc` + `vapostproc`), y grabar cuesta ~3 % de
+CPU. Instalación (desde una terminal; `pkexec` en lugar de `sudo` muestra
+el diálogo gráfico de contraseña):
 
 ```bash
 # intel-media-driver está en RPM Fusion *nonfree* (no en free)
@@ -80,6 +85,7 @@ sudo dnf swap libva-intel-media-driver intel-media-driver --allowerasing
 rm -rf ~/.cache/gstreamer-1.0    # que GStreamer vuelva a detectar los encoders
 vainfo | grep -i "H264.*Enc"     # debe listar VAEntrypointEncSliceLP
 gst-inspect-1.0 vah264lpenc      # debe existir
+# Volver atrás: sudo dnf swap intel-media-driver libva-intel-media-driver --allowerasing
 ```
 
 Reelix detecta el encoder en tiempo de ejecución; no hay que recompilar.
@@ -168,7 +174,8 @@ mirror = false
 | "No se pudo acceder a la pantalla" | Comprueba que la sesión es Wayland (`echo $XDG_SESSION_TYPE`) y que `xdg-desktop-portal-gnome` está instalado. `systemctl --user restart xdg-desktop-portal`. |
 | "Faltan componentes multimedia" | Falta `pipewire-gstreamer` (`gst-inspect-1.0 pipewiresrc`) u otro plugin. |
 | "No hay codificador de vídeo disponible" | `sudo dnf install gstreamer1-plugin-openh264`. |
-| CPU alta al grabar | Estás usando codificación por software; instala `intel-media-driver` (ver arriba). |
+| CPU alta al grabar | Estás usando codificación por software; instala `intel-media-driver` de RPM Fusion **nonfree** (ver arriba). En el log: `encoder=openh264enc` (software) o `vah264lpenc` (GPU). |
+| `dnf` no encuentra `intel-media-driver` | Está en RPM Fusion *nonfree*, no en *free*. |
 | Aviso "No se encontró ningún micrófono" | Revisa Configuración → Sonido → Entrada de GNOME y `wpctl status`. La grabación continúa sin micrófono. |
 | La barra de nivel no se mueve | El micrófono está silenciado o con volumen 0 en GNOME, o se eligió otro dispositivo. |
 | La burbuja tiene un cuadrado oscuro o difuminado alrededor | Lo pinta algo externo a Reelix: (1) un tema GTK con `window { background-color: … }` en `~/.config/gtk-4.0/gtk.css` (Reelix ya lo anula para la burbuja); (2) **Blur my Shell** con difuminado de aplicaciones: añade `io.github.oscar503sv.Reelix` a *Applications → Blacklist*. |
@@ -197,7 +204,7 @@ Detalles y decisiones en [ARCHITECTURE.md](ARCHITECTURE.md).
 - [x] **Fase 2**: micrófono y audio del sistema (PipeWire) + AAC en el mismo MP4.
 - [x] **Fase 3**: cámara (portal Camera) + composición en el pipeline.
 - [x] **Fase 4**: burbuja/overlay, pausa, cuenta atrás, biblioteca, preferencias, atajos globales (pendientes de verificar en uso real).
-- [ ] **Fase 5**: medición y optimización (VA-API sin copias, DMA-BUF).
+- [x] **Fase 5**: medición (estadísticas, benchmark) y optimización: sin relleno en los MP4, codificación y conversión de color en la GPU.
 - [ ] Empaquetado RPM y Flatpak.
 
 ## Licencia

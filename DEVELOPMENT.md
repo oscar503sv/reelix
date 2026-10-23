@@ -70,6 +70,19 @@ confirmación), así que la prueba funcional es manual:
    (renombrar, detalles, carpeta, papelera), preferencias, y atajos globales
    desde Preferencias → Atajos.
 
+## Medir rendimiento
+
+```bash
+cargo run --release --example bench -- --seconds 10                 # encoder automático
+cargo run --release --example bench -- --encoder software --audio
+cargo run --release --example bench -- --camera circle --content motion
+```
+
+Muestra CPU del proceso, RAM máxima, frames descartados, latencia de
+codificación y bitrate real. Generar la escena sintética de 1080p cuesta
+~42 % de un núcleo; réstalo al comparar con la app real. En la app, cada
+grabación deja en el log `frames`, `dropped` y `avg_encode_ms`.
+
 ## Instalación local
 
 ```bash

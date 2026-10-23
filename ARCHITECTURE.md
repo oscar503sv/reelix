@@ -292,6 +292,67 @@ antes con el portal `org.freedesktop.host.portal.Registry`. Mientras están
 activos se quitan los aceleradores internos equivalentes para no disparar
 dos veces.
 
+## Optimización (Fase 5)
+
+Se midió antes de optimizar, con dos herramientas:
+
+- **Estadísticas del pipeline** (`recording::stats`): frames en la cola del
+  encoder, codificados y descartados, y latencia de codificación por frame
+  (emparejados por timestamp; el desplazamiento constante que aplican los
+  encoders VA-API se aprende del primer frame). Se registran al guardar y se
+  avisa si se descarta más del 2 %.
+- **Benchmark** (`examples/bench.rs`): el `RecordingPipeline` real con
+  fuentes sintéticas 1080p30 a frames constantes (peor caso). Generar la
+  escena de prueba cuesta por sí solo ~42 % de un núcleo; se resta al
+  interpretar las cifras.
+
+### Hallazgos y cambios
+
+1. **El "bitrate excesivo" era relleno del contenedor.** El índice reservado
+   de `mp4mux` (para sobrevivir a cierres inesperados) añadía 7,9 MB de
+   `free` por pista a cada archivo: el 83 % de una grabación de 17 s. El
+   encoder producía 1,5 Mbit/s, por debajo del objetivo. Ahora se graba **MP4
+   fragmentado** (cada segundo autocontenido, sin relleno) y en *Processing*
+   se **remuxa** a MP4 normal con el índice delante (`qtdemux → h264parse /
+   aacparse → mp4mux faststart`, sin recodificar; los parsers son
+   necesarios: enlazar demuxer y muxer directamente se bloquea). 36 s de
+   grabación: remux en 48 ms. Si el remux falla se conserva el fragmentado,
+   que es válido.
+2. **GPU Intel (con `intel-media-driver` de RPM Fusion nonfree).** El encoder
+   Low Power de Tiger Lake solo admite *rate control* CQP: se usa VBR donde
+   exista y si no CQP con un QP derivado de la calidad (Baja 30, Media 26,
+   Alta 22). Sin B-frames (latencia y emparejamiento de estadísticas).
+   Las propiedades del encoder se fijan con setters que no hacen pánico
+   (`recording::props`): `set_property_from_str` con un valor no admitido
+   abortaba la app al empezar a grabar.
+3. **Conversión de color en la GPU.** Con encoder VA y `vapostproc`
+   disponibles, la conversión BGRx→NV12 y el escalado pasan a la GPU y el
+   encoder recibe superficies `memory:VAMemory`. Con cámara compuesta, ambas
+   formas componen en BGRA (I420 obligaría a convertir la pantalla en CPU;
+   `vapostproc` no acepta AYUV).
+
+### Resultados
+
+Benchmark, 1080p30 a frames constantes (incluye el 42 % de generar la escena):
+
+| | openh264 (CPU) | vah264lpenc + vapostproc (GPU) |
+|---|---|---|
+| Pantalla | 104 % | 50 % |
+| + cámara rectángulo | 140 % | 88 % |
+| + cámara círculo | 131 % | 80 % |
+| Latencia de codificación media | 13–16 ms | 4–6 ms |
+| RAM máxima (sin GTK) | 79–101 MB | 57–88 MB |
+
+App real (release, PipeWire, burbuja + micrófono, 36 s): CPU 13 % en reposo
+con la burbuja visible y **16 % grabando** (pico 25 %); RAM máxima 177 MB;
+0 frames descartados; archivo de 7,3 MB. Antes de la Fase 5 (build debug y
+software): ~90 % y 232 MB.
+
+Lo que queda del coste es sobre todo la **burbuja** (vista previa a 30 fps,
+conversión a BGRA y máscara en CPU, animación del borde). Posible mejora:
+convertir en la GPU y entregar DMA-BUF a `gtk4paintablesink`, aplicando la
+forma con un recorte de GTK en vez de la máscara.
+
 ## Investigación de plataforma (Fedora 44, GNOME 50, Intel Tiger Lake)
 
 | Tema | Conclusión |
@@ -299,7 +360,7 @@ dos veces.
 | ScreenCast portal | v5 en GNOME; pantalla y ventana; cursor embebido/oculto/metadata. Restore tokens disponibles (Fase 4). |
 | PipeWire | 1.6; `pipewiresrc` negocia BGRA/BGRx en memoria compartida; DMA-BUF posible con elementos que lo acepten (VA). |
 | GStreamer | 1.28; plugin `va` (nuevo, sustituye a `gstreamer-vaapi`, que está obsoleto). |
-| VA-API Intel | Driver iHD 26.x. La versión de Fedora solo expone JPEG encode; H.264/HEVC/VP9/AV1 encode requieren RPM Fusion. |
+| VA-API Intel | Driver iHD. La versión de Fedora solo expone JPEG encode; H.264/HEVC encode requieren `intel-media-driver` de RPM Fusion **nonfree** (no free). En Tiger Lake el encoder LP solo ofrece CQP. |
 | Cámara | Implementado (Fase 3): portal `Camera` + `pipewiresrc`; ver arriba. |
 | Audio | Implementado (Fase 2) con `pulsesrc` sobre pipewire-pulse; ver arriba. `webrtcdsp` está disponible para supresión de ruido/AGC (pendiente). |
 | Ventana siempre encima | **Wayland no permite que un cliente se ponga "always on top".** Opciones: el usuario lo activa desde el menú de la ventana (Alt+Espacio), una extensión de GNOME Shell, o dibujar la burbuja de cámara dentro del vídeo (composición). Decisión para la Fase 4. |

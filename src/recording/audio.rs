@@ -92,7 +92,9 @@ impl AacEncoderKind {
         let element = make(self.factory_name(), "audio-encoder")?;
         // The property type differs between encoders (int vs int64); parsing
         // from a string works for all of them.
-        element.set_property_from_str("bitrate", &AAC_BITRATE.to_string());
+        if element.find_property("bitrate").is_some() {
+            element.set_property_from_str("bitrate", &AAC_BITRATE.to_string());
+        }
         Ok(element)
     }
 }
