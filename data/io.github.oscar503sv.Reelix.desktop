@@ -1,0 +1,20 @@
+[Desktop Entry]
+Type=Application
+Name=Reelix
+GenericName=Screen Recorder
+GenericName[es]=Grabador de pantalla
+Comment=Record your screen, a window, your microphone and webcam
+Comment[es]=Graba tu pantalla, una ventana, tu micrófono y tu cámara
+Exec=reelix
+Icon=io.github.oscar503sv.Reelix
+Terminal=false
+Categories=GTK;GNOME;AudioVideo;Video;Recorder;
+Keywords=screencast;screen;record;recorder;video;loom;grabar;pantalla;
+StartupNotify=true
+DBusActivatable=false
+Actions=record;
+
+[Desktop Action record]
+Name=Record Screen
+Name[es]=Grabar pantalla
+Exec=reelix --record

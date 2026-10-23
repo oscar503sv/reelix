@@ -1,0 +1,39 @@
+[package]
+name = "reelix"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Native Wayland screen recorder for GNOME (local-first, Loom-like)"
+license = "MIT"
+repository = "https://github.com/oscar503sv/reelix"
+
+[[bin]]
+name = "reelix"
+path = "src/main.rs"
+
+[lib]
+name = "reelix"
+path = "src/lib.rs"
+
+[dependencies]
+gtk = { package = "gtk4", version = "0.11", features = ["v4_18"] }
+adw = { package = "libadwaita", version = "0.9", features = ["v1_7"] }
+gst = { package = "gstreamer", version = "0.25" }
+ashpd = { version = "0.13", default-features = false, features = ["screencast", "gtk4_wayland", "async-io"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+chrono = { version = "0.4", features = ["serde"] }
+directories = "6"
+clap = { version = "4", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

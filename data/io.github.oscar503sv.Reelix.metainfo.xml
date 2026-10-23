@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.oscar503sv.Reelix</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Reelix</name>
+  <summary>Record your screen, natively on GNOME</summary>
+  <summary xml:lang="es">Graba tu pantalla de forma nativa en GNOME</summary>
+  <developer id="io.github.oscar503sv">
+    <name>Oscar Aragon</name>
+  </developer>
+  <description>
+    <p>
+      Reelix is a lightweight, local-first screen recorder built for GNOME and
+      Wayland. It uses the XDG Desktop Portal and PipeWire to capture your
+      screen or a single window and GStreamer to encode MP4 files, with
+      hardware acceleration when available.
+    </p>
+    <p>Your recordings never leave your computer. There is no account, no cloud and no telemetry.</p>
+  </description>
+  <launchable type="desktop-id">io.github.oscar503sv.Reelix.desktop</launchable>
+  <url type="homepage">https://github.com/oscar503sv/reelix</url>
+  <url type="bugtracker">https://github.com/oscar503sv/reelix/issues</url>
+  <content_rating type="oars-1.1"/>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+  <releases>
+    <release version="0.1.0" date="2026-10-22">
+      <description>
+        <p>Phase 1 proof of concept: record a screen or window to MP4 through the ScreenCast portal.</p>
+      </description>
+    </release>
+  </releases>
+</component>
