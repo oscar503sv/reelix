@@ -29,6 +29,11 @@ jobs:
             gstreamer1-devel gstreamer1-plugins-base-devel \
             gstreamer1-plugins-base gstreamer1-plugins-good gstreamer1-plugins-bad-free \
             gettext desktop-file-utils appstream
+          # Encoders for the recording tests: openh264 (Cisco repo, enabled
+          # by default on Fedora) and fdk-aac-free for fdkaacenc.
+          dnf -y --setopt=install_weak_deps=False --enablerepo=fedora-cisco-openh264 install \
+            gstreamer1-plugin-openh264 fdk-aac-free
+
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
       - name: Formatting
