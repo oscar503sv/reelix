@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    # The job name is the required status check on `main`: keep it in sync
+    # with the repository ruleset if you rename it.
+    name: Build and test
+    runs-on: ubuntu-latest
+    container: registry.fedoraproject.org/fedora:44
+    steps:
+      - name: Install dependencies
+        run: |
+          dnf -y --setopt=install_weak_deps=False install \
+            git gcc cargo rustfmt clippy \
+            gtk4-devel libadwaita-devel \
+            gstreamer1-devel gstreamer1-plugins-base-devel \
+            gstreamer1-plugins-base gstreamer1-plugins-good gstreamer1-plugins-bad-free \
+            gettext desktop-file-utils appstream
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Formatting
+        run: cargo fmt --check
+      - name: Translations
+        run: po/update.sh --check && po/update.sh --stats
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Tests
+        run: cargo test --locked
+      - name: Desktop file and metainfo
+        run: |
+          packaging/install-data.sh "$RUNNER_TEMP/prefix"
+          desktop-file-validate "$RUNNER_TEMP"/prefix/share/applications/*.desktop
+          appstreamcli validate --no-net "$RUNNER_TEMP"/prefix/share/metainfo/*.xml

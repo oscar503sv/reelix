@@ -40,9 +40,8 @@ modules:
     build-commands:
       - cargo build --release --locked --offline
       - install -Dm755 target/release/reelix /app/bin/reelix
-      - install -Dm644 data/io.github.oscar503sv.Reelix.desktop /app/share/applications/io.github.oscar503sv.Reelix.desktop
-      - install -Dm644 data/io.github.oscar503sv.Reelix.metainfo.xml /app/share/metainfo/io.github.oscar503sv.Reelix.metainfo.xml
-      - cp -r data/icons /app/share/
+      - packaging/install-data.sh /app
+
     sources:
       - type: dir
         path: ../..

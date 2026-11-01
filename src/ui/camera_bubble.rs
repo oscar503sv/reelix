@@ -23,9 +23,11 @@ use gst::prelude::ElementExt;
 use gtk::prelude::*;
 use gtk::{gdk, glib};
 
+use crate::branding;
 use crate::capture::camera::CameraAccess;
 use crate::config::{CameraSettings, CameraShape, CameraSize};
 use crate::error::{AppError, Result};
+use crate::i18n::{fill, gettext};
 use crate::recording::camera::{PreviewOutput, build_preview_chain, va_rgb_dmabuf_formats};
 use crate::storage::format_duration;
 use crate::ui::bubble_video::BubbleVideo;
@@ -102,13 +104,13 @@ impl CameraBubble {
             .build();
         let stop = gtk::Button::builder()
             .icon_name("media-playback-stop-symbolic")
-            .tooltip_text("Detener la grabación")
+            .tooltip_text(gettext("Stop Recording"))
             .css_classes(["circular", "destructive-action"])
             .build();
         stop.connect_clicked(move |_| on_stop());
         let pause = gtk::Button::builder()
             .icon_name("media-playback-pause-symbolic")
-            .tooltip_text("Pausar")
+            .tooltip_text(gettext("Pause"))
             .css_classes(["circular"])
             .build();
         pause.connect_clicked(move |_| on_pause());
@@ -149,7 +151,11 @@ impl CameraBubble {
 
         let window = gtk::Window::builder()
             .application(app)
-            .title("Reelix — cámara")
+            // Translators: title of the camera bubble window.
+            .title(fill(
+                &gettext("{app} — camera"),
+                &[("app", &branding::APP_NAME)],
+            ))
             .decorated(false)
             .resizable(false)
             .css_classes(["reelix-bubble"])
@@ -285,12 +291,13 @@ impl CameraBubble {
     /// the paused state is obvious.
     pub fn set_paused(&self, paused: bool) {
         let (icon, tip) = if paused {
-            ("media-playback-start-symbolic", "Reanudar")
+            ("media-playback-start-symbolic", gettext("Resume"))
         } else {
-            ("media-playback-pause-symbolic", "Pausar")
+            ("media-playback-pause-symbolic", gettext("Pause"))
         };
         self.pause.set_icon_name(icon);
-        self.pause.set_tooltip_text(Some(tip));
+        self.pause.set_tooltip_text(Some(&tip));
+
         if paused {
             self.controls.set_reveal_child(true);
         }

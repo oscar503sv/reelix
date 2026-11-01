@@ -7,6 +7,8 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+use crate::i18n::{fill, gettext};
+
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error("screen cast portal error: {0}")]
@@ -74,80 +76,92 @@ impl AppError {
         }
     }
 
-    /// Short title and longer explanation suitable for a dialog.
+    /// Short title and longer explanation suitable for a dialog, translated.
     pub fn user_message(&self) -> (String, String) {
-        match self {
+        let (title, body) = match self {
             Self::Portal(_) => (
-                "No se pudo acceder a la pantalla".into(),
-                "Comprueba que xdg-desktop-portal y xdg-desktop-portal-gnome están \
-                 instalados y que la sesión es Wayland."
-                    .into(),
+                gettext("Could not access the screen"),
+                gettext(
+                    "Check that xdg-desktop-portal and xdg-desktop-portal-gnome are installed \
+                     and that the session is Wayland.",
+                ),
             ),
             Self::SelectionCancelled => (
-                "Grabación cancelada".into(),
-                "No se seleccionó ninguna pantalla ni ventana.".into(),
+                gettext("Recording cancelled"),
+                gettext("No screen or window was selected."),
             ),
             Self::NoStream => (
-                "No se pudo acceder a la pantalla".into(),
-                "El portal de captura no devolvió ninguna fuente. Inténtalo de nuevo.".into(),
+                gettext("Could not access the screen"),
+                gettext("The screen capture portal returned no source. Please try again."),
             ),
             Self::NoCamera => (
-                "No hay cámara disponible".into(),
-                "No se detectó ninguna cámara. Se grabará sin ella.".into(),
+                gettext("No camera available"),
+                gettext("No camera was detected. Recording will continue without it."),
             ),
             Self::CameraDenied => (
-                "Acceso a la cámara denegado".into(),
-                "Puedes permitirlo en Configuración → Privacidad → Cámara.".into(),
+                gettext("Camera access denied"),
+                gettext("You can allow it in Settings → Privacy → Camera."),
             ),
             Self::GstInit(_) | Self::MissingElement(_) => (
-                "Faltan componentes multimedia".into(),
-                "Instala GStreamer y sus plugins: \
-                 sudo dnf install pipewire-gstreamer gstreamer1-plugins-good \
-                 gstreamer1-plugins-bad-free gstreamer1-plugin-openh264"
-                    .into(),
+                gettext("Multimedia components are missing"),
+                gettext(
+                    "Install GStreamer and its plugins: sudo dnf install pipewire-gstreamer \
+                     gstreamer1-plugins-good gstreamer1-plugins-bad-free \
+                     gstreamer1-plugin-openh264",
+                ),
             ),
             Self::NoEncoder(_) => (
-                "No hay codificador de vídeo disponible".into(),
-                "Instala gstreamer1-plugin-openh264 o, para aceleración por hardware \
-                 en Intel, intel-media-driver de RPM Fusion."
-                    .into(),
+                gettext("No video encoder available"),
+                gettext(
+                    "Install gstreamer1-plugin-openh264 or, for hardware acceleration on \
+                     Intel, intel-media-driver from RPM Fusion.",
+                ),
             ),
             Self::NoAudioEncoder(_) => (
-                "No hay codificador de audio disponible".into(),
-                "Instala fdk-aac-free y gstreamer1-plugins-bad-free, o \
-                 gstreamer1-plugin-libav."
-                    .into(),
+                gettext("No audio encoder available"),
+                gettext(
+                    "Install fdk-aac-free and gstreamer1-plugins-bad-free, or \
+                     gstreamer1-plugin-libav.",
+                ),
             ),
             Self::Pipeline(_) | Self::Streaming { .. } => (
-                "La grabación falló".into(),
-                "Se produjo un error en el pipeline multimedia. Ejecuta con \
-                 RUST_LOG=debug para ver los detalles."
-                    .into(),
+                gettext("Recording failed"),
+                gettext(
+                    "An error occurred in the multimedia pipeline. Run with RUST_LOG=debug \
+                     to see the details.",
+                ),
             ),
             Self::Io { path, .. } => (
-                "Error de archivo".into(),
-                format!("No se pudo leer o escribir {}.", path.display()),
+                gettext("File error"),
+                fill(
+                    &gettext("Could not read or write {path}."),
+                    &[("path", &path.display())],
+                ),
             ),
             Self::Config { path, .. } => (
-                "Configuración inválida".into(),
-                format!(
-                    "El archivo {} no es válido. Se usará la configuración por defecto.",
-                    path.display()
+                gettext("Invalid settings"),
+                fill(
+                    &gettext("The file {path} is not valid. The default settings will be used."),
+                    &[("path", &path.display())],
                 ),
             ),
             Self::Metadata(_) => (
-                "Metadatos inválidos".into(),
-                "No se pudieron leer o escribir los metadatos de la grabación.".into(),
+                gettext("Invalid metadata"),
+                gettext("The recording metadata could not be read or written."),
             ),
             Self::InvalidTransition(_) => (
-                "Operación no disponible".into(),
-                "Esta acción no es posible en el estado actual.".into(),
+                gettext("Action not available"),
+                gettext("This action is not possible right now."),
             ),
             Self::RecordingNotFound(name) => (
-                "Grabación no encontrada".into(),
-                format!("No existe la grabación «{name}»."),
+                gettext("Recording not found"),
+                fill(
+                    &gettext("The recording “{name}” does not exist."),
+                    &[("name", name)],
+                ),
             ),
-        }
+        };
+        (title, body)
     }
 }
 

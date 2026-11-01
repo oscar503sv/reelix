@@ -3,11 +3,10 @@
   <id>io.github.oscar503sv.Reelix</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
-  <name>Reelix</name>
+  <name translate="no">Reelix</name>
   <summary>Record your screen, natively on GNOME</summary>
-  <summary xml:lang="es">Graba tu pantalla de forma nativa en GNOME</summary>
   <developer id="io.github.oscar503sv">
-    <name>Oscar Aragon</name>
+    <name translate="no">Oscar Aragon</name>
   </developer>
   <description>
     <p>
@@ -22,23 +21,23 @@
   <screenshots>
     <screenshot type="default">
       <caption>Record your screen with microphone, system audio and camera</caption>
-      <caption xml:lang="es">Graba tu pantalla con micrófono, audio del sistema y cámara</caption>
-      <image>https://raw.githubusercontent.com/oscar503sv/reelix/e7f139bf3add345f4ec70f0d49cd6e7f01f388e1/data/screenshots/main.png</image>
+      <image>https://raw.githubusercontent.com/oscar503sv/reelix/v0.8.0/data/screenshots/main.png</image>
+      <image xml:lang="es">https://raw.githubusercontent.com/oscar503sv/reelix/v0.8.0/data/screenshots/es/main.png</image>
     </screenshot>
     <screenshot>
       <caption>Your recordings, stored on your computer</caption>
-      <caption xml:lang="es">Tus grabaciones, guardadas en tu equipo</caption>
-      <image>https://raw.githubusercontent.com/oscar503sv/reelix/e7f139bf3add345f4ec70f0d49cd6e7f01f388e1/data/screenshots/library.png</image>
+      <image>https://raw.githubusercontent.com/oscar503sv/reelix/v0.8.0/data/screenshots/library.png</image>
+      <image xml:lang="es">https://raw.githubusercontent.com/oscar503sv/reelix/v0.8.0/data/screenshots/es/library.png</image>
     </screenshot>
     <screenshot>
       <caption>Frame rate, quality, resolution and encoder</caption>
-      <caption xml:lang="es">Fotogramas, calidad, resolución y codificador</caption>
-      <image>https://raw.githubusercontent.com/oscar503sv/reelix/e7f139bf3add345f4ec70f0d49cd6e7f01f388e1/data/screenshots/preferences.png</image>
+      <image>https://raw.githubusercontent.com/oscar503sv/reelix/v0.8.0/data/screenshots/preferences.png</image>
+      <image xml:lang="es">https://raw.githubusercontent.com/oscar503sv/reelix/v0.8.0/data/screenshots/es/preferences.png</image>
     </screenshot>
     <screenshot>
       <caption>Dark style</caption>
-      <caption xml:lang="es">Estilo oscuro</caption>
-      <image>https://raw.githubusercontent.com/oscar503sv/reelix/e7f139bf3add345f4ec70f0d49cd6e7f01f388e1/data/screenshots/main-dark.png</image>
+      <image>https://raw.githubusercontent.com/oscar503sv/reelix/v0.8.0/data/screenshots/main-dark.png</image>
+      <image xml:lang="es">https://raw.githubusercontent.com/oscar503sv/reelix/v0.8.0/data/screenshots/es/main-dark.png</image>
     </screenshot>
   </screenshots>
   <branding>
@@ -58,6 +57,11 @@
     <control>pointing</control>
   </supports>
   <releases>
+    <release version="0.8.0" date="2026-11-01">
+      <description>
+        <p>The interface is now in English and Spanish, and open to translations into any language.</p>
+      </description>
+    </release>
     <release version="0.7.1" date="2026-11-01">
       <description>
         <p>The main window shows the new app icon, and the app moves to the GNOME 51 platform.</p>

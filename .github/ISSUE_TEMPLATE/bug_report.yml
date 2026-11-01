@@ -1,0 +1,31 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Reelix version and package
+      placeholder: 0.8.0, Flatpak / RPM / built from source
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Distribution, GNOME version and GPU
+      placeholder: Fedora 44, GNOME 51, Intel Iris Xe
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Run `RUST_LOG=debug reelix` (or `flatpak run --env=RUST_LOG=debug io.github.oscar503sv.Reelix`) and paste the relevant part.
+      render: text
