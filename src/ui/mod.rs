@@ -7,6 +7,7 @@ mod camera_panel;
 mod library;
 mod main_window;
 mod preferences;
+mod screenshots;
 mod shortcuts;
 
 use std::rc::Rc;
@@ -20,10 +21,13 @@ use crate::config::Settings;
 use main_window::{MainWindow, WindowObserver};
 use shortcuts::ShortcutsManager;
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct LaunchOptions {
     /// Open the source picker immediately (`--record`).
     pub record_on_start: bool,
+    /// Render the screenshots into this directory and quit
+    /// (`--screenshots`, hidden; see `packaging/screenshots.sh`).
+    pub screenshots: Option<std::path::PathBuf>,
 }
 
 /// Runs the GUI until the last window closes.
@@ -32,7 +36,7 @@ pub fn run(options: LaunchOptions) -> glib::ExitCode {
         .application_id(branding::APP_ID)
         .build();
 
-    app.connect_activate(move |app| activate(app, options));
+    app.connect_activate(move |app| activate(app, options.clone()));
     // GTK must not parse our CLI flags; clap already did.
     app.run_with_args::<&str>(&[])
 }
@@ -73,6 +77,13 @@ fn activate(app: &adw::Application, options: LaunchOptions) {
                 tracing::warn!(error = %e, "global shortcuts unavailable at startup");
             }
         });
+    }
+
+    if let Some(dir) = options.screenshots {
+        let app = app.clone();
+        let gtk_window = window.window().clone();
+        glib::spawn_future_local(screenshots::capture_all(app, gtk_window, dir));
+        return;
     }
 
     if options.record_on_start {
@@ -183,6 +194,12 @@ fn load_css() {
     let Some(display) = gtk::gdk::Display::default() else {
         return;
     };
+    // Running from a source checkout (`cargo run`): the app icon is not
+    // installed yet, so look for it in the repository's data/icons.
+    let source_icons = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data/icons");
+    if source_icons.is_dir() {
+        gtk::IconTheme::for_display(&display).add_search_path(source_icons);
+    }
     let provider = gtk::CssProvider::new();
     provider.load_from_string(camera_bubble::CSS);
     // Above USER priority on purpose: themes installed in

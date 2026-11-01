@@ -19,6 +19,32 @@
     </p>
     <p>Your recordings never leave your computer. There is no account, no cloud and no telemetry.</p>
   </description>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Record your screen with microphone, system audio and camera</caption>
+      <caption xml:lang="es">Graba tu pantalla con micrófono, audio del sistema y cámara</caption>
+      <image>https://raw.githubusercontent.com/oscar503sv/reelix/main/data/screenshots/main.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Your recordings, stored on your computer</caption>
+      <caption xml:lang="es">Tus grabaciones, guardadas en tu equipo</caption>
+      <image>https://raw.githubusercontent.com/oscar503sv/reelix/main/data/screenshots/library.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Frame rate, quality, resolution and encoder</caption>
+      <caption xml:lang="es">Fotogramas, calidad, resolución y codificador</caption>
+      <image>https://raw.githubusercontent.com/oscar503sv/reelix/main/data/screenshots/preferences.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Dark style</caption>
+      <caption xml:lang="es">Estilo oscuro</caption>
+      <image>https://raw.githubusercontent.com/oscar503sv/reelix/main/data/screenshots/main-dark.png</image>
+    </screenshot>
+  </screenshots>
+  <branding>
+    <color type="primary" scheme_preference="light">#c9c0ff</color>
+    <color type="primary" scheme_preference="dark">#30364c</color>
+  </branding>
   <launchable type="desktop-id">io.github.oscar503sv.Reelix.desktop</launchable>
   <url type="homepage">https://github.com/oscar503sv/reelix</url>
   <url type="bugtracker">https://github.com/oscar503sv/reelix/issues</url>

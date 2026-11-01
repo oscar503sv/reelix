@@ -42,6 +42,9 @@ pub struct MainWindow {
     inhibit_cookie: RefCell<Option<u32>>,
 }
 
+/// Hero icon sizes: the app icon when idle, symbolic status icons otherwise.
+const IDLE_ICON_SIZE: i32 = 96;
+const STATUS_ICON_SIZE: i32 = 64;
 const IDLE_DESCRIPTION: &str = "Graba tu pantalla o una ventana. Todo se guarda localmente.";
 
 impl MainWindow {
@@ -94,9 +97,8 @@ impl MainWindow {
         // Header: a plain box rather than AdwStatusPage, which scrolls on its
         // own and gets squeezed when other content shares the window.
         let status_icon = gtk::Image::builder()
-            .icon_name("media-record-symbolic")
-            .pixel_size(64)
-            .css_classes(["dim-label"])
+            .icon_name(branding::APP_ID)
+            .pixel_size(IDLE_ICON_SIZE)
             .build();
         let status_title = gtk::Label::builder()
             .label(branding::APP_NAME)
@@ -469,7 +471,7 @@ impl MainWindow {
             RecorderState::Idle
             | RecorderState::Completed { .. }
             | RecorderState::Failed { .. } => (
-                "media-record-symbolic",
+                branding::APP_ID,
                 branding::APP_NAME.to_owned(),
                 IDLE_DESCRIPTION.to_owned(),
             ),
@@ -500,7 +502,20 @@ impl MainWindow {
                 "Finalizando el archivo de vídeo.".to_owned(),
             ),
         };
+        // Idle shows the app icon in colour; other states a dimmed symbolic
+        // status icon.
+        let idle = icon == branding::APP_ID;
         self.status_icon.set_icon_name(Some(icon));
+        self.status_icon.set_pixel_size(if idle {
+            IDLE_ICON_SIZE
+        } else {
+            STATUS_ICON_SIZE
+        });
+        if idle {
+            self.status_icon.remove_css_class("dim-label");
+        } else {
+            self.status_icon.add_css_class("dim-label");
+        }
         self.status_title.set_label(&title);
         self.status_description.set_label(&description);
         self.status_description.set_visible(!description.is_empty());

@@ -141,12 +141,25 @@ El runtime trae GStreamer 1.26 con VA-API (extensión Intel), x264
 (extensión codecs-extra), AAC de libav y `gtk4paintablesink`; Reelix detecta
 los elementos en ejecución.
 
+## Capturas de pantalla
+
+```bash
+packaging/screenshots.sh    # regenera data/screenshots/*.png
+```
+
+Arranca la app con un perfil temporal (ajustes por defecto, tema Adwaita sin
+el `gtk.css` del usuario y grabaciones de ejemplo) y la opción oculta
+`--screenshots DIR`, que renderiza cada vista con GTK directamente a PNG a
+escala 2×. El metainfo y los README enlazan esas imágenes (en el metainfo,
+desde `raw.githubusercontent.com/…/main/`).
+
 ## Al publicar una versión
 
 1. Subir la versión en `Cargo.toml`, `packaging/rpm/reelix.spec` (Version y
    `%changelog`) y añadir `<release>` en el metainfo.
 2. `cargo test`, commit y etiqueta `vX.Y.Z`.
-3. `packaging/rpm/build-rpm.sh` y `packaging/flatpak/build-flatpak.sh`;
+3. Si cambió la interfaz, `packaging/screenshots.sh`.
+4. `packaging/rpm/build-rpm.sh` y `packaging/flatpak/build-flatpak.sh`;
    adjuntar a la release de GitHub el `.rpm`, el `.flatpak` y el
    `reelix-X.Y.Z-vendor.tar.xz`.
 

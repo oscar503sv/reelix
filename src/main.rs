@@ -19,6 +19,10 @@ struct Cli {
     /// List saved recordings and exit.
     #[arg(long, conflicts_with = "record")]
     list: bool,
+
+    /// Render screenshots into DIR and quit (for AppStream/README).
+    #[arg(long, value_name = "DIR", hide = true)]
+    screenshots: Option<std::path::PathBuf>,
 }
 
 fn main() -> ExitCode {
@@ -46,6 +50,7 @@ fn main() -> ExitCode {
     );
     let code = ui::run(LaunchOptions {
         record_on_start: cli.record,
+        screenshots: cli.screenshots,
     });
     ExitCode::from(code.get())
 }
