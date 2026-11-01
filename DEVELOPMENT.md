@@ -91,17 +91,37 @@ grabación deja en el log `frames`, `dropped` y `avg_encode_ms`.
 ```bash
 cargo build --release
 install -Dm755 target/release/reelix ~/.local/bin/reelix
-install -Dm644 data/io.github.oscar503sv.Reelix.desktop ~/.local/share/applications/io.github.oscar503sv.Reelix.desktop
-cp -r data/icons ~/.local/share/
+packaging/install-data.sh ~/.local    # traducciones, .desktop, metainfo, iconos
 update-desktop-database ~/.local/share/applications
 ```
 
-Validar metadatos:
+Validar metadatos (el `.desktop` y el metainfo se generan desde los `.in`
+de `data/` con las traducciones de `po/`):
 
 ```bash
-desktop-file-validate data/*.desktop
-appstreamcli validate --no-net data/*.metainfo.xml
+packaging/install-data.sh /tmp/reelix-data
+desktop-file-validate /tmp/reelix-data/share/applications/*.desktop
+appstreamcli validate --no-net /tmp/reelix-data/share/metainfo/*.xml
 ```
+
+## Traducciones
+
+La interfaz usa gettext (`src/i18n.rs`). Los textos fuente están en inglés:
+`gettext("…")` en el código, `N_("…")`/`NC_("contexto", "…")` en tablas
+`const` (se traducen al mostrarlos), y marcadores `{nombre}` rellenados con
+`i18n::fill` para que el traductor pueda reordenarlos. Las fechas usan
+formatos traducibles (`i18n::date_time`) y los tamaños `glib::format_size`.
+
+```bash
+po/update.sh            # regenera po/reelix.pot y fusiona cada po/<idioma>.po
+po/update.sh --check    # lo que comprueba la CI
+po/update.sh --stats
+LANGUAGE=en cargo run   # forzar un idioma
+```
+
+`build.rs` compila `po/*.po` para que `cargo run` salga traducido; los
+paquetes instalan los `.mo` con `packaging/install-data.sh`. La guía para
+traductores está en [CONTRIBUTING.md](CONTRIBUTING.md#translations).
 
 ## Empaquetado
 
@@ -144,19 +164,23 @@ los elementos en ejecución.
 ## Capturas de pantalla
 
 ```bash
-packaging/screenshots.sh    # regenera data/screenshots/*.png
+packaging/screenshots.sh    # regenera data/screenshots/*.png (inglés) y data/screenshots/es/
 ```
 
 Arranca la app con un perfil temporal (ajustes por defecto, tema Adwaita sin
 el `gtk.css` del usuario y grabaciones de ejemplo) y la opción oculta
 `--screenshots DIR`, que renderiza cada vista con GTK directamente a PNG a
-escala 2×. El metainfo y los README enlazan esas imágenes (en el metainfo,
-desde `raw.githubusercontent.com/…/main/`).
+escala 2×, una vez por idioma (`LANGS` en el script). El metainfo enlaza
+las imágenes desde la etiqueta de la versión
+(`raw.githubusercontent.com/…/vX.Y.Z/…`, con `xml:lang` para cada idioma):
+al publicar una versión hay que actualizar esa etiqueta en las URL.
 
 ## Al publicar una versión
 
 1. Subir la versión en `Cargo.toml`, `packaging/rpm/reelix.spec` (Version y
-   `%changelog`) y añadir `<release>` en el metainfo.
+   `%changelog`), añadir `<release>` en `data/*.metainfo.xml.in`, cambiar
+   la etiqueta de las URL de las capturas y ejecutar `po/update.sh`.
+
 2. `cargo test`, commit y etiqueta `vX.Y.Z`.
 3. Si cambió la interfaz, `packaging/screenshots.sh`.
 4. `packaging/rpm/build-rpm.sh` y `packaging/flatpak/build-flatpak.sh`;

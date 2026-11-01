@@ -10,30 +10,50 @@ use gtk::gio;
 use super::shortcuts::ShortcutsManager;
 use crate::app::Controller;
 use crate::config::{EncoderPreference, Quality, Resolution, Settings};
+use crate::i18n::{N_, NC_, fill, gettext, pgettext};
 use crate::recording::EncoderKind;
 
 const FPS_CHOICES: [u32; 4] = [15, 24, 30, 60];
+// Must match the literal contexts below (xgettext needs literals).
+const QUALITY_CONTEXT: &str = "video quality";
+const RESOLUTION_CONTEXT: &str = "recording resolution";
+const ENCODER_CONTEXT: &str = "video encoder";
 const QUALITIES: [(Quality, &str); 3] = [
-    (Quality::Low, "Baja (archivos pequeños)"),
-    (Quality::Medium, "Media"),
-    (Quality::High, "Alta"),
+    (Quality::Low, NC_("video quality", "Low (smaller files)")),
+    (Quality::Medium, NC_("video quality", "Medium")),
+    (Quality::High, NC_("video quality", "High")),
 ];
 const RESOLUTIONS: [(Resolution, &str); 3] = [
-    (Resolution::Original, "Original"),
-    (Resolution::P1080, "1080p como máximo"),
-    (Resolution::P720, "720p como máximo (menos recursos)"),
+    (
+        Resolution::Original,
+        NC_("recording resolution", "Original"),
+    ),
+    (
+        Resolution::P1080,
+        NC_("recording resolution", "Up to 1080p"),
+    ),
+    (
+        Resolution::P720,
+        NC_("recording resolution", "Up to 720p (fewer resources)"),
+    ),
 ];
 const ENCODERS: [(EncoderPreference, &str); 3] = [
-    (EncoderPreference::Auto, "Automático"),
-    (EncoderPreference::Hardware, "Hardware (GPU)"),
-    (EncoderPreference::Software, "Software (CPU)"),
+    (EncoderPreference::Auto, NC_("video encoder", "Automatic")),
+    (
+        EncoderPreference::Hardware,
+        NC_("video encoder", "Hardware (GPU)"),
+    ),
+    (
+        EncoderPreference::Software,
+        NC_("video encoder", "Software (CPU)"),
+    ),
 ];
 const SHORTCUTS: [(&str, &str); 5] = [
-    ("<Control><Shift>r", "Empezar o detener la grabación"),
-    ("<Control><Shift>p", "Pausar o reanudar"),
-    ("Escape", "Cancelar (descarta la grabación)"),
-    ("<Control>comma", "Preferencias"),
-    ("<Control>q", "Salir"),
+    ("<Control><Shift>r", N_("Start or stop recording")),
+    ("<Control><Shift>p", N_("Pause or resume")),
+    ("Escape", N_("Cancel (discards the recording)")),
+    ("<Control>comma", N_("Preferences")),
+    ("<Control>q", N_("Quit")),
 ];
 
 /// Opens the preferences dialog. `on_storage_changed` runs when the
@@ -46,7 +66,7 @@ pub fn show(
 ) {
     let settings = controller.settings();
     let dialog = adw::PreferencesDialog::builder()
-        .title("Preferencias")
+        .title(gettext("Preferences"))
         .search_enabled(false)
         .build();
     dialog.add(&recording_page(controller, &settings));
@@ -58,14 +78,18 @@ pub fn show(
 
 fn recording_page(controller: &Rc<Controller>, settings: &Settings) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
-        .title("Grabación")
+        .title(gettext("Recording"))
         .icon_name("media-record-symbolic")
         .build();
 
-    let general = adw::PreferencesGroup::builder().title("General").build();
+    let general = adw::PreferencesGroup::builder()
+        .title(gettext("General"))
+        .build();
     let countdown = adw::SpinRow::builder()
-        .title("Cuenta atrás")
-        .subtitle("Segundos antes de empezar a grabar (0 = sin cuenta atrás)")
+        .title(gettext("Countdown"))
+        .subtitle(gettext(
+            "Seconds before recording starts (0 = no countdown)",
+        ))
         .adjustment(&gtk::Adjustment::new(
             f64::from(settings.recording.countdown_seconds),
             0.0,
@@ -83,7 +107,7 @@ fn recording_page(controller: &Rc<Controller>, settings: &Settings) -> adw::Pref
         });
     }
     let cursor = adw::SwitchRow::builder()
-        .title("Mostrar el puntero")
+        .title(gettext("Show Pointer"))
         .active(settings.video.show_cursor)
         .build();
     {
@@ -96,17 +120,24 @@ fn recording_page(controller: &Rc<Controller>, settings: &Settings) -> adw::Pref
     general.add(&countdown);
     general.add(&cursor);
 
-    let video = adw::PreferencesGroup::builder().title("Vídeo").build();
-    let fps_labels: Vec<String> = FPS_CHOICES.iter().map(|f| format!("{f} fps")).collect();
+    let video = adw::PreferencesGroup::builder()
+        .title(gettext("Video"))
+        .build();
+    let fps_labels: Vec<String> = FPS_CHOICES
+        .iter()
+        .map(|f| fill(&gettext("{fps} fps"), &[("fps", f)]))
+        .collect();
     let fps = combo(
-        "Fotogramas por segundo",
+        &gettext("Frames per Second"),
         &fps_labels,
         FPS_CHOICES
             .iter()
             .position(|f| *f == settings.video.fps)
             .unwrap_or(2),
     );
-    fps.set_subtitle("Máximo: con la pantalla quieta se graban menos");
+    fps.set_subtitle(&gettext(
+        "Maximum: fewer are recorded while the screen is still",
+    ));
     {
         let controller = Rc::clone(controller);
         fps.connect_selected_notify(move |row| {
@@ -116,8 +147,8 @@ fn recording_page(controller: &Rc<Controller>, settings: &Settings) -> adw::Pref
         });
     }
     let quality = combo(
-        "Calidad",
-        &labels(&QUALITIES),
+        &gettext("Quality"),
+        &labels(QUALITY_CONTEXT, &QUALITIES),
         index_of(&QUALITIES, settings.video.quality),
     );
     {
@@ -130,11 +161,11 @@ fn recording_page(controller: &Rc<Controller>, settings: &Settings) -> adw::Pref
         });
     }
     let resolution = combo(
-        "Resolución",
-        &labels(&RESOLUTIONS),
+        &gettext("Resolution"),
+        &labels(RESOLUTION_CONTEXT, &RESOLUTIONS),
         index_of(&RESOLUTIONS, settings.video.resolution),
     );
-    resolution.set_subtitle("Menor resolución: menos CPU y archivos más pequeños");
+    resolution.set_subtitle(&gettext("Lower resolution: less CPU and smaller files"));
     {
         let controller = Rc::clone(controller);
         resolution.connect_selected_notify(move |row| {
@@ -145,8 +176,8 @@ fn recording_page(controller: &Rc<Controller>, settings: &Settings) -> adw::Pref
         });
     }
     let encoder = combo(
-        "Codificador",
-        &labels(&ENCODERS),
+        &gettext("Encoder"),
+        &labels(ENCODER_CONTEXT, &ENCODERS),
         index_of(&ENCODERS, settings.video.encoder),
     );
     encoder.set_subtitle(&encoder_in_use(settings.video.encoder));
@@ -170,29 +201,36 @@ fn recording_page(controller: &Rc<Controller>, settings: &Settings) -> adw::Pref
     page
 }
 
-/// "En uso: openh264enc (software)" for the given preference.
+/// "In use: openh264enc (CPU)" for the given preference.
 fn encoder_in_use(preference: EncoderPreference) -> String {
     match EncoderKind::detect(preference) {
-        Ok(kind) => format!(
-            "En uso: {kind} ({})",
-            if kind.is_hardware() { "GPU" } else { "CPU" }
+        Ok(kind) => fill(
+            // Translators: {encoder} is a GStreamer element name, {device}
+            // is "GPU" or "CPU".
+            &gettext("In use: {encoder} ({device})"),
+            &[
+                ("encoder", &kind),
+                ("device", &if kind.is_hardware() { "GPU" } else { "CPU" }),
+            ],
         ),
-        Err(_) => "No hay ningún codificador H.264 disponible".to_owned(),
+        Err(_) => gettext("No H.264 encoder available"),
     }
 }
 
 fn audio_page(controller: &Rc<Controller>, settings: &Settings) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
-        .title("Audio")
+        .title(gettext("Audio"))
         .icon_name("audio-input-microphone-symbolic")
         .build();
     let group = adw::PreferencesGroup::builder()
-        .title("Micrófono")
-        .description("El dispositivo se elige en la ventana principal.")
+        .title(gettext("Microphone"))
+        .description(gettext("The device is chosen in the main window."))
         .build();
     let volume = adw::SpinRow::builder()
-        .title("Volumen de entrada")
-        .subtitle("Porcentaje aplicado a la grabación (100 % = sin cambios)")
+        .title(gettext("Input Volume"))
+        .subtitle(gettext(
+            "Percentage applied to the recording (100% = unchanged)",
+        ))
         .digits(0)
         .adjustment(&gtk::Adjustment::new(
             (settings.audio.microphone_volume * 100.0).round(),
@@ -221,25 +259,27 @@ fn storage_page(
     on_changed: Rc<dyn Fn()>,
 ) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
-        .title("Almacenamiento")
+        .title(gettext("Storage"))
         .icon_name("folder-videos-symbolic")
         .build();
     let group = adw::PreferencesGroup::builder()
-        .title("Grabaciones")
-        .description("Solo se guardan en tu equipo. Nunca se envían a Internet.")
+        .title(gettext("Recordings"))
+        .description(gettext(
+            "They are only saved on your computer. Never sent to the Internet.",
+        ))
         .build();
     let folder = adw::ActionRow::builder()
-        .title("Carpeta")
+        .title(gettext("Folder"))
         .subtitle(settings.recording_dir().display().to_string())
         .subtitle_selectable(true)
         .build();
     let choose = gtk::Button::builder()
-        .label("Cambiar…")
+        .label(gettext("Change…"))
         .valign(gtk::Align::Center)
         .build();
     let reset = gtk::Button::builder()
         .icon_name("edit-undo-symbolic")
-        .tooltip_text("Volver a la carpeta predeterminada")
+        .tooltip_text(gettext("Back to the default folder"))
         .valign(gtk::Align::Center)
         .css_classes(["flat"])
         .sensitive(settings.storage.recording_dir.is_some())
@@ -266,7 +306,7 @@ fn storage_page(
         let controller = Rc::clone(controller);
         choose.connect_clicked(move |button| {
             let dialog = gtk::FileDialog::builder()
-                .title("Carpeta de grabaciones")
+                .title(gettext("Recordings Folder"))
                 .initial_folder(&gio::File::for_path(controller.settings().recording_dir()))
                 .build();
             let parent = button.root().and_downcast::<gtk::Window>();
@@ -296,16 +336,16 @@ fn shortcuts_page(
     manager: &Rc<ShortcutsManager>,
 ) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
-        .title("Atajos")
+        .title(gettext("Shortcuts"))
         .icon_name("preferences-desktop-keyboard-shortcuts-symbolic")
         .build();
     page.add(&global_shortcuts_group(controller, manager));
     let group = adw::PreferencesGroup::builder()
-        .title("Con la ventana de Reelix enfocada")
-        .description("Durante la grabación usa los botones de la burbuja de cámara.")
+        .title(gettext("With the Reelix Window Focused"))
+        .description(gettext("While recording, use the camera bubble buttons."))
         .build();
     for (accel, title) in SHORTCUTS {
-        let row = adw::ActionRow::builder().title(title).build();
+        let row = adw::ActionRow::builder().title(gettext(title)).build();
         let label = adw::ShortcutLabel::new(accel);
         label.set_valign(gtk::Align::Center);
         row.add_suffix(&label);
@@ -320,18 +360,18 @@ fn global_shortcuts_group(
     manager: &Rc<ShortcutsManager>,
 ) -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::builder()
-        .title("Atajos globales")
-        .description(
-            "Funcionan aunque Reelix no esté enfocada (por ejemplo, grabando con la \
-             ventana minimizada). GNOME te pedirá confirmarlos o cambiarlos.",
-        )
+        .title(gettext("Global Shortcuts"))
+        .description(gettext(
+            "They work even when Reelix is not focused (for example, recording with the \
+             window minimized). GNOME will ask you to confirm or change them.",
+        ))
         .build();
     let switch = adw::SwitchRow::builder()
-        .title("Activar atajos globales")
+        .title(gettext("Enable Global Shortcuts"))
         .subtitle(if manager.is_active() {
-            "Activos"
+            gettext("Active")
         } else {
-            "Ctrl+Mayús+R y Ctrl+Mayús+P en todo el sistema"
+            gettext("Ctrl+Shift+R and Ctrl+Shift+P system-wide")
         })
         .active(manager.is_active())
         .build();
@@ -347,11 +387,11 @@ fn global_shortcuts_group(
         if !row.is_active() {
             manager.disable();
             controller.update_settings(|s| s.shortcuts.global = false);
-            row.set_subtitle("Desactivados");
+            row.set_subtitle(&gettext("Disabled"));
             return;
         }
         row.set_sensitive(false);
-        row.set_subtitle("Esperando confirmación de GNOME…");
+        row.set_subtitle(&gettext("Waiting for GNOME to confirm…"));
         let (row, manager, controller, reverting) = (
             row.clone(),
             Rc::clone(&manager),
@@ -363,14 +403,17 @@ fn global_shortcuts_group(
                 Ok(triggers) => {
                     controller.update_settings(|s| s.shortcuts.global = true);
                     let assigned: Vec<String> = triggers.into_iter().map(|(_, t)| t).collect();
-                    row.set_subtitle(&format!("Activos: {}", assigned.join(", ")));
+                    row.set_subtitle(&fill(
+                        &gettext("Active: {shortcuts}"),
+                        &[("shortcuts", &assigned.join(", "))],
+                    ));
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "global shortcuts not enabled");
                     reverting.set(true);
                     row.set_active(false);
                     reverting.set(false);
-                    row.set_subtitle("No se activaron (cancelado o no disponible)");
+                    row.set_subtitle(&gettext("Not enabled (cancelled or unavailable)"));
                 }
             }
             row.set_sensitive(true);
@@ -389,8 +432,8 @@ fn combo(title: &str, labels: &[String], selected: usize) -> adw::ComboRow {
         .build()
 }
 
-fn labels<T>(choices: &[(T, &str)]) -> Vec<String> {
-    choices.iter().map(|(_, l)| (*l).to_owned()).collect()
+fn labels<T>(context: &str, choices: &[(T, &str)]) -> Vec<String> {
+    choices.iter().map(|(_, l)| pgettext(context, *l)).collect()
 }
 
 fn index_of<T: PartialEq>(choices: &[(T, &str)], value: T) -> usize {

@@ -20,8 +20,9 @@ A native, Loom-style screen recorder for GNOME and Wayland.
 
 </div>
 
-> The user interface is currently in Spanish; an English translation is on
-> the roadmap.
+> The interface is available in **English** and **Spanish**, and follows
+> your system language. Want Reelix in your language? Translations are
+> welcome: see the [translation guide](CONTRIBUTING.md#translations).
 
 ---
 
@@ -253,7 +254,17 @@ GTK4/libadwaita (UI) → Controller + state machine → ScreenCast portal (ashpd
 
 Design decisions and measurements in [ARCHITECTURE.md](ARCHITECTURE.md),
 development guide in [DEVELOPMENT.md](DEVELOPMENT.md) and how to contribute
-in [CONTRIBUTING.md](CONTRIBUTING.md) (in Spanish).
+in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## 🌍 Translations
+
+| Language | Status |
+|---|---|
+| English | source language |
+| Spanish (`es`) | complete |
+
+Adding a language takes one file, `po/<code>.po`, sent as a pull request.
+The [translation guide](CONTRIBUTING.md#translations) walks you through it.
 
 ## 🗺️ Roadmap
 
@@ -265,7 +276,8 @@ in [CONTRIBUTING.md](CONTRIBUTING.md) (in Spanish).
 - [x] **Phase 6**: low resource usage: GPU bubble (19 % → 6 % CPU) and maximum resolution.
 - [x] **Phase 7**: RPM and Flatpak packages, final icon, screenshots and the 0.7.0 release.
 - [ ] Flathub and COPR.
-- [ ] English translation of the interface.
+- [x] Interface in English and Spanish, open to more languages (0.8.0).
+
 - [ ] Remember the chosen screen (portal restore tokens).
 
 ## 🎨 Branding

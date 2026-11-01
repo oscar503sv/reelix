@@ -6,7 +6,7 @@
 %global cargo_install_lib 0
 
 Name:           reelix
-Version:        0.7.1
+Version:        0.8.0
 Release:        1%{?dist}
 Summary:        Screen recorder for GNOME with microphone, system audio and camera bubble
 
@@ -25,6 +25,8 @@ BuildRequires:  pkgconfig(libadwaita-1) >= 1.8
 BuildRequires:  pkgconfig(gstreamer-1.0)
 BuildRequires:  pkgconfig(gstreamer-base-1.0)
 BuildRequires:  pkgconfig(gstreamer-video-1.0)
+# msgfmt: translations, and the translated .desktop/metainfo files.
+BuildRequires:  gettext
 BuildRequires:  desktop-file-utils
 BuildRequires:  /usr/bin/appstreamcli
 %if %{with check}
@@ -68,11 +70,8 @@ XDG portals on Wayland and encodes on the GPU when possible.
 
 %install
 %cargo_install
-install -Dpm0644 data/io.github.oscar503sv.Reelix.desktop \
-    %{buildroot}%{_datadir}/applications/io.github.oscar503sv.Reelix.desktop
-install -Dpm0644 data/io.github.oscar503sv.Reelix.metainfo.xml \
-    %{buildroot}%{_metainfodir}/io.github.oscar503sv.Reelix.metainfo.xml
-cp -pr data/icons %{buildroot}%{_datadir}/
+packaging/install-data.sh %{buildroot}%{_prefix}
+%find_lang %{name}
 
 %check
 desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.oscar503sv.Reelix.desktop
@@ -83,7 +82,8 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/io.github.oscar503sv.
 %cargo_test
 %endif
 
-%files
+%files -f %{name}.lang
+
 %license LICENSE LICENSE.dependencies cargo-vendor.txt
 %doc README.md ARCHITECTURE.md
 %{_bindir}/reelix
@@ -92,6 +92,9 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/io.github.oscar503sv.
 %{_datadir}/icons/hicolor/*/apps/io.github.oscar503sv.Reelix*
 
 %changelog
+* Sun Nov 01 2026 Oscar Aragon <oscararagon.hdz@gmail.com> - 0.8.0-1
+- English and Spanish interface, translatable with gettext
+
 * Sun Nov 01 2026 Oscar Aragon <oscararagon.hdz@gmail.com> - 0.7.1-1
 - App icon in the main window, screenshots in the metainfo
 

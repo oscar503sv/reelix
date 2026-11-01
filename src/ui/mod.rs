@@ -18,6 +18,7 @@ use gtk::{gio, glib};
 use crate::app::Controller;
 use crate::branding;
 use crate::config::Settings;
+use crate::i18n::gettext;
 use main_window::{MainWindow, WindowObserver};
 use shortcuts::ShortcutsManager;
 
@@ -168,7 +169,10 @@ fn install_actions(
                 .application_name(branding::APP_NAME)
                 .application_icon(branding::APP_ID)
                 .version(branding::VERSION)
-                .comments("Grabador de pantalla nativo para GNOME y Wayland")
+                .comments(gettext("Native screen recorder for GNOME and Wayland"))
+                // Translators: replace with your name (and e-mail), one
+                // translator per line. It appears in the About dialog.
+                .translator_credits(gettext("translator-credits"))
                 .license_type(gtk::License::MitX11)
                 .website("https://github.com/oscar503sv/reelix")
                 .build()

@@ -8,15 +8,22 @@ use adw::prelude::*;
 use crate::app::Controller;
 use crate::capture::camera::list_cameras;
 use crate::config::{CameraShape, CameraSize, Settings};
+use crate::i18n::{NC_, gettext, pgettext};
 
+// Must match the literal contexts below (xgettext needs literals).
+const SIZE_CONTEXT: &str = "camera size";
+const SHAPE_CONTEXT: &str = "camera shape";
 const SIZES: [(CameraSize, &str); 3] = [
-    (CameraSize::Small, "Pequeña"),
-    (CameraSize::Medium, "Mediana"),
-    (CameraSize::Large, "Grande"),
+    (CameraSize::Small, NC_("camera size", "Small")),
+    (CameraSize::Medium, NC_("camera size", "Medium")),
+    (CameraSize::Large, NC_("camera size", "Large")),
 ];
 const SHAPES: [(CameraShape, &str); 2] = [
-    (CameraShape::Rectangle, "Rectángulo"),
-    (CameraShape::Circle, "Círculo (usa más CPU)"),
+    (CameraShape::Rectangle, NC_("camera shape", "Rectangle")),
+    (
+        CameraShape::Circle,
+        NC_("camera shape", "Circle (uses more CPU)"),
+    ),
 ];
 
 pub struct CameraPanel {
@@ -32,13 +39,14 @@ impl CameraPanel {
         let cameras = list_cameras();
 
         let enabled = adw::SwitchRow::builder()
-            .title("Cámara")
-            .subtitle("Superpone tu cámara sobre la grabación")
+            .title(gettext("Camera"))
+            .subtitle(gettext("Overlays your camera on the recording"))
             .active(settings.enabled)
             .build();
         enabled.add_prefix(&gtk::Image::from_icon_name("camera-web-symbolic"));
 
-        let device_labels: Vec<String> = std::iter::once("Predeterminada".to_owned())
+        // Translators: the default camera.
+        let device_labels: Vec<String> = std::iter::once(gettext("Default"))
             .chain(cameras.iter().map(|c| c.label.clone()))
             .collect();
         let device_index = settings
@@ -46,12 +54,20 @@ impl CameraPanel {
             .as_deref()
             .and_then(|id| cameras.iter().position(|c| c.id == id))
             .map_or(0, |i| i + 1);
-        let device = combo("Dispositivo", &device_labels, device_index);
+        let device = combo(&gettext("Device"), &device_labels, device_index);
 
-        let size = combo("Tamaño", &labels(&SIZES), index_of(&SIZES, settings.size));
-        let shape = combo("Forma", &labels(&SHAPES), index_of(&SHAPES, settings.shape));
+        let size = combo(
+            &gettext("Size"),
+            &labels(SIZE_CONTEXT, &SIZES),
+            index_of(&SIZES, settings.size),
+        );
+        let shape = combo(
+            &gettext("Shape"),
+            &labels(SHAPE_CONTEXT, &SHAPES),
+            index_of(&SHAPES, settings.shape),
+        );
         let mirror = adw::SwitchRow::builder()
-            .title("Efecto espejo")
+            .title(gettext("Mirror"))
             .active(settings.mirror)
             .build();
 
@@ -62,7 +78,7 @@ impl CameraPanel {
             mirror.clone().upcast(),
         ];
         let group = adw::PreferencesGroup::builder()
-            .title("Cámara")
+            .title(gettext("Camera"))
             .margin_bottom(24)
             .build();
         group.add(&enabled);
@@ -138,8 +154,8 @@ fn combo(title: &str, labels: &[String], selected: usize) -> adw::ComboRow {
         .build()
 }
 
-fn labels<T>(choices: &[(T, &str)]) -> Vec<String> {
-    choices.iter().map(|(_, l)| (*l).to_owned()).collect()
+fn labels<T>(context: &str, choices: &[(T, &str)]) -> Vec<String> {
+    choices.iter().map(|(_, l)| pgettext(context, *l)).collect()
 }
 
 fn index_of<T: PartialEq>(choices: &[(T, &str)], value: T) -> usize {

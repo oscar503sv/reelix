@@ -15,6 +15,7 @@ use super::library::{LibraryActions, LibraryDialog, recording_row};
 use crate::app::{Controller, ControllerObserver, RecorderState};
 use crate::branding;
 use crate::error::AppError;
+use crate::i18n::{N_, fill, gettext};
 use crate::storage::format_duration;
 
 const RECENT_LIMIT: usize = 5;
@@ -45,7 +46,7 @@ pub struct MainWindow {
 /// Hero icon sizes: the app icon when idle, symbolic status icons otherwise.
 const IDLE_ICON_SIZE: i32 = 96;
 const STATUS_ICON_SIZE: i32 = 64;
-const IDLE_DESCRIPTION: &str = "Graba tu pantalla o una ventana. Todo se guarda localmente.";
+const IDLE_DESCRIPTION: &str = N_("Record your screen or a window. Everything is saved locally.");
 
 impl MainWindow {
     pub fn new(app: &adw::Application, controller: Rc<Controller>) -> Rc<Self> {
@@ -57,21 +58,21 @@ impl MainWindow {
 
     fn build(app: &adw::Application, controller: Rc<Controller>, weak: Weak<Self>) -> Self {
         let record_button = gtk::Button::builder()
-            .label("Grabar pantalla")
-            .tooltip_text("Grabar pantalla (Ctrl+Mayús+R)")
+            .label(gettext("Record Screen"))
+            .tooltip_text(gettext("Record Screen (Ctrl+Shift+R)"))
             .halign(gtk::Align::Center)
             .css_classes(["pill", "suggested-action"])
             .build();
         let stop_button = gtk::Button::builder()
-            .label("Detener")
-            .tooltip_text("Detener (Ctrl+Mayús+R)")
+            .label(gettext("Stop"))
+            .tooltip_text(gettext("Stop (Ctrl+Shift+R)"))
             .halign(gtk::Align::Center)
             .css_classes(["pill", "destructive-action"])
             .visible(false)
             .build();
         let pause_button = gtk::Button::builder()
-            .label("Pausar")
-            .tooltip_text("Pausar o reanudar (Ctrl+Mayús+P)")
+            .label(gettext("Pause"))
+            .tooltip_text(gettext("Pause or Resume (Ctrl+Shift+P)"))
             .halign(gtk::Align::Center)
             .css_classes(["pill"])
             .visible(false)
@@ -86,7 +87,7 @@ impl MainWindow {
             .max_value(1.0)
             .width_request(200)
             .halign(gtk::Align::Center)
-            .tooltip_text("Nivel del micrófono")
+            .tooltip_text(gettext("Microphone level"))
             .visible(false)
             .build();
         // Plain meter: no "low/high/full" color offsets.
@@ -107,7 +108,7 @@ impl MainWindow {
             .justify(gtk::Justification::Center)
             .build();
         let status_description = gtk::Label::builder()
-            .label(IDLE_DESCRIPTION)
+            .label(gettext(IDLE_DESCRIPTION))
             .css_classes(["dim-label"])
             .wrap(true)
             .justify(gtk::Justification::Center)
@@ -131,17 +132,17 @@ impl MainWindow {
         }
 
         let recent_group = adw::PreferencesGroup::builder()
-            .title("Grabaciones recientes")
+            .title(gettext("Recent Recordings"))
             .build();
         let open_folder = gtk::Button::builder()
             .icon_name("folder-open-symbolic")
-            .tooltip_text("Abrir carpeta de grabaciones")
+            .tooltip_text(gettext("Open Recordings Folder"))
             .valign(gtk::Align::Center)
             .css_classes(["flat"])
             .action_name("app.open-folder")
             .build();
         let see_all = gtk::Button::builder()
-            .label("Ver todas")
+            .label(gettext("See All"))
             .valign(gtk::Align::Center)
             .css_classes(["flat"])
             .action_name("app.library")
@@ -198,14 +199,17 @@ impl MainWindow {
         toasts.set_child(Some(&scrolled));
 
         let menu = gio::Menu::new();
-        menu.append(Some("Mis grabaciones"), Some("app.library"));
-        menu.append(Some("Preferencias"), Some("app.preferences"));
+        menu.append(Some(&gettext("My Recordings")), Some("app.library"));
+        menu.append(Some(&gettext("Preferences")), Some("app.preferences"));
         menu.append(
-            Some("Abrir carpeta de grabaciones"),
+            Some(&gettext("Open Recordings Folder")),
             Some("app.open-folder"),
         );
         menu.append(
-            Some(&format!("Acerca de {}", branding::APP_NAME)),
+            Some(&fill(
+                &gettext("About {app}"),
+                &[("app", &branding::APP_NAME)],
+            )),
             Some("app.about"),
         );
         let header = adw::HeaderBar::new();
@@ -214,7 +218,7 @@ impl MainWindow {
                 .icon_name("open-menu-symbolic")
                 .menu_model(&menu)
                 .primary(true)
-                .tooltip_text("Menú principal")
+                .tooltip_text(gettext("Main Menu"))
                 .build(),
         );
 
@@ -273,7 +277,10 @@ impl MainWindow {
                     if this.bubble.is_shown() && !this.bubble_hint_shown.replace(true) {
                         this.toasts.add_toast(
                             adw::Toast::builder()
-                                .title("Arrastra la burbuja donde quieras. Con Alt+Espacio sobre ella: «Siempre encima» y «Siempre en el área de trabajo visible»")
+                                // Translators: "Always on Top" and "Always on
+                                // Visible Workspace" are GNOME's window menu
+                                // items; use their names in your language.
+                                .title(gettext("Drag the bubble wherever you like. Press Alt+Space over it for “Always on Top” and “Always on Visible Workspace”"))
                                 .timeout(10)
                                 .build(),
                         );
@@ -414,7 +421,7 @@ impl MainWindow {
                 let id = app.inhibit(
                     Some(&self.window),
                     gtk::ApplicationInhibitFlags::IDLE | gtk::ApplicationInhibitFlags::SUSPEND,
-                    Some("Grabando la pantalla"),
+                    Some(&gettext("Recording the screen")),
                 );
                 *cookie = (id != 0).then_some(id);
             }
@@ -433,8 +440,11 @@ impl MainWindow {
         self.stop_button.set_visible(capturing);
         self.pause_button.set_visible(capturing);
         let paused = *state == RecorderState::Paused;
-        self.pause_button
-            .set_label(if paused { "Reanudar" } else { "Pausar" });
+        self.pause_button.set_label(&if paused {
+            gettext("Resume")
+        } else {
+            gettext("Pause")
+        });
         self.bubble.set_paused(paused);
         self.timer_label.set_visible(capturing);
         if !capturing {
@@ -473,33 +483,34 @@ impl MainWindow {
             | RecorderState::Failed { .. } => (
                 branding::APP_ID,
                 branding::APP_NAME.to_owned(),
-                IDLE_DESCRIPTION.to_owned(),
+                gettext(IDLE_DESCRIPTION),
             ),
             RecorderState::SelectingSource => (
                 "video-display-symbolic",
-                "Elige qué grabar".to_owned(),
-                "Selecciona una pantalla o ventana en el diálogo del sistema.".to_owned(),
+                gettext("Choose What to Record"),
+                gettext("Select a screen or window in the system dialog."),
             ),
             RecorderState::Preparing => (
                 "content-loading-symbolic",
-                "Preparando…".to_owned(),
+                gettext("Preparing…"),
                 String::new(),
             ),
             RecorderState::Recording => (
                 "media-record-symbolic",
-                "Grabando".to_owned(),
-                "Pulsa Ctrl+Mayús+R o «Dejar de compartir» en la barra superior para terminar."
-                    .to_owned(),
+                gettext("Recording"),
+                // Translators: "Stop Sharing" is the button in GNOME's
+                // top bar screen-sharing indicator.
+                gettext("Press Ctrl+Shift+R or “Stop Sharing” in the top bar to finish."),
             ),
             RecorderState::Paused => (
                 "media-playback-pause-symbolic",
-                "En pausa".to_owned(),
+                gettext("Paused"),
                 String::new(),
             ),
             RecorderState::Stopping | RecorderState::Processing => (
                 "document-save-symbolic",
-                "Guardando…".to_owned(),
-                "Finalizando el archivo de vídeo.".to_owned(),
+                gettext("Saving…"),
+                gettext("Finishing the video file."),
             ),
         };
         // Idle shows the app icon in colour; other states a dimmed symbolic
@@ -530,8 +541,8 @@ impl MainWindow {
             self.refresh_recent();
             self.window.present();
             let toast = adw::Toast::builder()
-                .title("Grabación guardada")
-                .button_label("Reproducir")
+                .title(gettext("Recording saved"))
+                .button_label(gettext("Play"))
                 .timeout(8)
                 .build();
             let file = gio::File::for_path(path);
@@ -564,7 +575,7 @@ impl ControllerObserver for WindowObserver {
             return;
         }
         let dialog = adw::AlertDialog::new(Some(&title), Some(&body));
-        dialog.add_response("ok", "Aceptar");
+        dialog.add_response("ok", &gettext("OK"));
         this.window.present();
         dialog.present(Some(&this.window));
     }
@@ -573,12 +584,13 @@ impl ControllerObserver for WindowObserver {
         let this = &self.0;
         if remaining == 0 {
             this.bubble.set_countdown(None);
-            this.status_title.set_label("Grabando…");
+            this.status_title.set_label(&gettext("Recording…"));
             return;
         }
         this.status_title.set_label(&remaining.to_string());
         this.status_description
-            .set_label("La grabación empieza enseguida. Esc para cancelar.");
+            .set_label(&gettext("Recording starts in a moment. Esc to cancel."));
+
         this.status_description.set_visible(true);
         this.bubble.set_countdown(Some(remaining));
     }

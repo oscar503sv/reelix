@@ -1,0 +1,905 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR The Reelix authors
+# This file is distributed under the same license as the reelix package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: reelix 0.8.0\n"
+"Report-Msgid-Bugs-To: https://github.com/oscar503sv/reelix/issues\n"
+"POT-Creation-Date: 2026-11-01 14:55-0600\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#. Translators: the app name; leave it untranslated (empty).
+#: data/io.github.oscar503sv.Reelix.desktop.in
+msgid "Reelix"
+msgstr ""
+
+#: data/io.github.oscar503sv.Reelix.desktop.in
+msgid "Screen Recorder"
+msgstr ""
+
+#: data/io.github.oscar503sv.Reelix.desktop.in
+msgid "Record your screen, a window, your microphone and webcam"
+msgstr ""
+
+#. Translators: search terms, separated and ended by semicolons.
+#: data/io.github.oscar503sv.Reelix.desktop.in
+msgid "screencast;screen;record;recorder;video;loom;"
+msgstr ""
+
+#: data/io.github.oscar503sv.Reelix.desktop.in src/ui/main_window.rs
+msgid "Record Screen"
+msgstr ""
+
+#: data/io.github.oscar503sv.Reelix.metainfo.xml.in
+msgid "Record your screen, natively on GNOME"
+msgstr ""
+
+#: data/io.github.oscar503sv.Reelix.metainfo.xml.in
+msgid ""
+"Reelix is a lightweight, local-first screen recorder built for GNOME and "
+"Wayland. It uses the XDG Desktop Portal and PipeWire to capture your screen "
+"or a single window, together with your microphone and system audio, and "
+"GStreamer to encode MP4 files, with hardware acceleration when available."
+msgstr ""
+
+#: data/io.github.oscar503sv.Reelix.metainfo.xml.in
+msgid ""
+"Your recordings never leave your computer. There is no account, no cloud and "
+"no telemetry."
+msgstr ""
+
+#: data/io.github.oscar503sv.Reelix.metainfo.xml.in
+msgid "Record your screen with microphone, system audio and camera"
+msgstr ""
+
+#: data/io.github.oscar503sv.Reelix.metainfo.xml.in
+msgid "Your recordings, stored on your computer"
+msgstr ""
+
+#: data/io.github.oscar503sv.Reelix.metainfo.xml.in
+msgid "Frame rate, quality, resolution and encoder"
+msgstr ""
+
+#: data/io.github.oscar503sv.Reelix.metainfo.xml.in
+msgid "Dark style"
+msgstr ""
+
+#: data/io.github.oscar503sv.Reelix.metainfo.xml.in
+msgid ""
+"The interface is now in English and Spanish, and open to translations into "
+"any language."
+msgstr ""
+
+#: data/io.github.oscar503sv.Reelix.metainfo.xml.in
+msgid ""
+"The main window shows the new app icon, and the app moves to the GNOME 51 "
+"platform."
+msgstr ""
+
+#: data/io.github.oscar503sv.Reelix.metainfo.xml.in
+msgid ""
+"Low resource usage: the camera bubble is processed on the GPU (about a third "
+"of the CPU it used), and a maximum recording resolution setting."
+msgstr ""
+
+#: data/io.github.oscar503sv.Reelix.metainfo.xml.in
+msgid ""
+"New icon, RPM and Flatpak packages, and a more robust pause that works with "
+"every capture source."
+msgstr ""
+
+#: data/io.github.oscar503sv.Reelix.metainfo.xml.in
+msgid ""
+"Much smaller files (no container padding), GPU encoding and colour "
+"conversion on Intel, and recording statistics."
+msgstr ""
+
+#: data/io.github.oscar503sv.Reelix.metainfo.xml.in
+msgid ""
+"Pause and resume without gaps, countdown before recording, a recordings "
+"library (rename, show in folder, copy, details, move to trash), preferences "
+"and optional system-wide shortcuts."
+msgstr ""
+
+#: data/io.github.oscar503sv.Reelix.metainfo.xml.in
+msgid ""
+"Floating camera bubble with a live preview and a colour-shifting border, "
+"recorded as part of the screen; recording controls on the bubble."
+msgstr ""
+
+#: data/io.github.oscar503sv.Reelix.metainfo.xml.in
+msgid ""
+"Phase 3: overlay the webcam on the recording as a rectangle or a circle, in "
+"any corner, in three sizes."
+msgstr ""
+
+#: data/io.github.oscar503sv.Reelix.metainfo.xml.in
+msgid ""
+"Phase 2: record the microphone and system audio (mixed, with a level meter "
+"and a limiter) into the MP4 as AAC."
+msgstr ""
+
+#: data/io.github.oscar503sv.Reelix.metainfo.xml.in
+msgid ""
+"Phase 1 proof of concept: record a screen or window to MP4 through the "
+"ScreenCast portal."
+msgstr ""
+
+#: src/app/controller.rs
+msgid "No microphone found: recording without it."
+msgstr ""
+
+#: src/app/controller.rs
+msgid "The selected microphone is not connected: using the default one."
+msgstr ""
+
+#: src/app/controller.rs
+msgid "No AAC audio encoder: recording without audio."
+msgstr ""
+
+#: src/app/controller.rs
+msgid "The selected camera is not connected: using the default one."
+msgstr ""
+
+#: src/app/controller.rs
+msgid "An audio source was lost; the recording so far was saved."
+msgstr ""
+
+#: src/app/controller.rs
+msgid "The camera was lost; the recording so far was saved."
+msgstr ""
+
+#. Translators: default title of a new recording; {date} is
+#. the date and time it started.
+#: src/app/controller.rs
+#, rust-format
+msgid "Recording {date}"
+msgstr ""
+
+#: src/app/global_shortcuts.rs src/ui/preferences.rs
+msgid "Start or stop recording"
+msgstr ""
+
+#: src/app/global_shortcuts.rs
+msgid "Pause or resume recording"
+msgstr ""
+
+#: src/error.rs
+msgid "Could not access the screen"
+msgstr ""
+
+#: src/error.rs
+msgid ""
+"Check that xdg-desktop-portal and xdg-desktop-portal-gnome are installed and "
+"that the session is Wayland."
+msgstr ""
+
+#: src/error.rs
+msgid "Recording cancelled"
+msgstr ""
+
+#: src/error.rs
+msgid "No screen or window was selected."
+msgstr ""
+
+#: src/error.rs
+msgid "The screen capture portal returned no source. Please try again."
+msgstr ""
+
+#: src/error.rs
+msgid "No camera available"
+msgstr ""
+
+#: src/error.rs
+msgid "No camera was detected. Recording will continue without it."
+msgstr ""
+
+#: src/error.rs
+msgid "Camera access denied"
+msgstr ""
+
+#: src/error.rs
+msgid "You can allow it in Settings → Privacy → Camera."
+msgstr ""
+
+#: src/error.rs
+msgid "Multimedia components are missing"
+msgstr ""
+
+#: src/error.rs
+msgid ""
+"Install GStreamer and its plugins: sudo dnf install pipewire-gstreamer "
+"gstreamer1-plugins-good gstreamer1-plugins-bad-free gstreamer1-plugin-"
+"openh264"
+msgstr ""
+
+#: src/error.rs
+msgid "No video encoder available"
+msgstr ""
+
+#: src/error.rs
+msgid ""
+"Install gstreamer1-plugin-openh264 or, for hardware acceleration on Intel, "
+"intel-media-driver from RPM Fusion."
+msgstr ""
+
+#: src/error.rs
+msgid "No audio encoder available"
+msgstr ""
+
+#: src/error.rs
+msgid ""
+"Install fdk-aac-free and gstreamer1-plugins-bad-free, or gstreamer1-plugin-"
+"libav."
+msgstr ""
+
+#: src/error.rs
+msgid "Recording failed"
+msgstr ""
+
+#: src/error.rs
+msgid ""
+"An error occurred in the multimedia pipeline. Run with RUST_LOG=debug to see "
+"the details."
+msgstr ""
+
+#: src/error.rs
+msgid "File error"
+msgstr ""
+
+#: src/error.rs
+#, rust-format
+msgid "Could not read or write {path}."
+msgstr ""
+
+#: src/error.rs
+msgid "Invalid settings"
+msgstr ""
+
+#: src/error.rs
+#, rust-format
+msgid "The file {path} is not valid. The default settings will be used."
+msgstr ""
+
+#: src/error.rs
+msgid "Invalid metadata"
+msgstr ""
+
+#: src/error.rs
+msgid "The recording metadata could not be read or written."
+msgstr ""
+
+#: src/error.rs
+msgid "Action not available"
+msgstr ""
+
+#: src/error.rs
+msgid "This action is not possible right now."
+msgstr ""
+
+#: src/error.rs
+msgid "Recording not found"
+msgstr ""
+
+#: src/error.rs
+#, rust-format
+msgid "The recording “{name}” does not exist."
+msgstr ""
+
+#. Translators: date and time format (chrono strftime). Use numbers
+#. only: month and day names are always in English.
+#: src/i18n.rs
+msgid "%m/%d/%Y %H:%M"
+msgstr ""
+
+#. Translators: date and time format with seconds (chrono strftime).
+#. Use numbers only.
+#: src/i18n.rs
+msgid "%m/%d/%Y %H:%M:%S"
+msgstr ""
+
+#: src/main.rs
+#, rust-format
+msgid "{app} must not be run as root."
+msgstr ""
+
+#: src/main.rs
+#, rust-format
+msgid "No recordings in {dir}"
+msgstr ""
+
+#: src/ui/audio_panel.rs src/ui/preferences.rs
+msgid "Microphone"
+msgstr ""
+
+#: src/ui/audio_panel.rs
+msgid "System Default"
+msgstr ""
+
+#: src/ui/audio_panel.rs src/ui/camera_panel.rs
+msgid "Device"
+msgstr ""
+
+#: src/ui/audio_panel.rs
+msgid "System Audio"
+msgstr ""
+
+#: src/ui/audio_panel.rs
+msgid "What plays through your speakers or headphones"
+msgstr ""
+
+#: src/ui/audio_panel.rs src/ui/preferences.rs
+msgid "Audio"
+msgstr ""
+
+#: src/ui/camera_bubble.rs
+msgid "Stop Recording"
+msgstr ""
+
+#: src/ui/camera_bubble.rs src/ui/main_window.rs
+msgid "Pause"
+msgstr ""
+
+#: src/ui/camera_bubble.rs
+#, rust-format
+msgid "{app} — camera"
+msgstr ""
+
+#: src/ui/camera_bubble.rs src/ui/main_window.rs
+msgid "Resume"
+msgstr ""
+
+#: src/ui/camera_panel.rs
+msgctxt "camera size"
+msgid "Small"
+msgstr ""
+
+#: src/ui/camera_panel.rs
+msgctxt "camera size"
+msgid "Medium"
+msgstr ""
+
+#: src/ui/camera_panel.rs
+msgctxt "camera size"
+msgid "Large"
+msgstr ""
+
+#: src/ui/camera_panel.rs
+msgctxt "camera shape"
+msgid "Rectangle"
+msgstr ""
+
+#: src/ui/camera_panel.rs
+msgctxt "camera shape"
+msgid "Circle (uses more CPU)"
+msgstr ""
+
+#: src/ui/camera_panel.rs
+msgid "Camera"
+msgstr ""
+
+#: src/ui/camera_panel.rs
+msgid "Overlays your camera on the recording"
+msgstr ""
+
+#. Translators: the default camera.
+#: src/ui/camera_panel.rs
+msgid "Default"
+msgstr ""
+
+#: src/ui/camera_panel.rs
+msgid "Size"
+msgstr ""
+
+#: src/ui/camera_panel.rs
+msgid "Shape"
+msgstr ""
+
+#: src/ui/camera_panel.rs
+msgid "Mirror"
+msgstr ""
+
+#: src/ui/library.rs src/ui/main_window.rs
+msgid "Play"
+msgstr ""
+
+#: src/ui/library.rs
+msgid "Rename…"
+msgstr ""
+
+#: src/ui/library.rs
+msgid "Show in Folder"
+msgstr ""
+
+#: src/ui/library.rs
+msgid "Copy File"
+msgstr ""
+
+#: src/ui/library.rs
+msgid "Details"
+msgstr ""
+
+#: src/ui/library.rs
+msgid "Move to Trash"
+msgstr ""
+
+#: src/ui/library.rs
+msgid "Actions"
+msgstr ""
+
+#. Translators: recording made today; {time} is e.g. 14:05.
+#: src/ui/library.rs
+#, rust-format
+msgid "Today {time}"
+msgstr ""
+
+#. Translators: recording made yesterday; {time} is e.g. 14:05.
+#: src/ui/library.rs
+#, rust-format
+msgid "Yesterday {time}"
+msgstr ""
+
+#. Translators: GLib date format for a recording made this year
+#. (e.g. "Oct 20 14:05"); see g_date_time_format().
+#: src/ui/library.rs
+msgid "%b %-d %H:%M"
+msgstr ""
+
+#. Translators: GLib date format for an older recording
+#. (e.g. "Dec 31, 2025 14:05"); see g_date_time_format().
+#: src/ui/library.rs
+msgid "%b %-d, %Y %H:%M"
+msgstr ""
+
+#: src/ui/library.rs
+msgid "Could not open the folder"
+msgstr ""
+
+#: src/ui/library.rs
+msgid "File copied: paste it anywhere"
+msgstr ""
+
+#: src/ui/library.rs
+msgid "Could not copy the file"
+msgstr ""
+
+#: src/ui/library.rs
+msgid "Rename Recording"
+msgstr ""
+
+#: src/ui/library.rs
+msgid "Cancel"
+msgstr ""
+
+#: src/ui/library.rs
+msgid "Rename"
+msgstr ""
+
+#: src/ui/library.rs
+msgid "No"
+msgstr ""
+
+#: src/ui/library.rs
+msgid "Yes"
+msgstr ""
+
+#: src/ui/library.rs
+#, rust-format
+msgid "Date: {value}"
+msgstr ""
+
+#: src/ui/library.rs
+#, rust-format
+msgid "Duration: {value}"
+msgstr ""
+
+#: src/ui/library.rs
+#, rust-format
+msgid "Resolution: {value}"
+msgstr ""
+
+#: src/ui/library.rs
+#, rust-format
+msgid "Max. FPS: {value}"
+msgstr ""
+
+#: src/ui/library.rs
+#, rust-format
+msgid "Audio: {value}"
+msgstr ""
+
+#: src/ui/library.rs
+#, rust-format
+msgid "Camera overlay: {value}"
+msgstr ""
+
+#: src/ui/library.rs
+#, rust-format
+msgid "Encoder: {value}"
+msgstr ""
+
+#: src/ui/library.rs
+msgid "No metadata"
+msgstr ""
+
+#: src/ui/library.rs
+#, rust-format
+msgid "Size: {value}"
+msgstr ""
+
+#: src/ui/library.rs
+#, rust-format
+msgid "File: {value}"
+msgstr ""
+
+#: src/ui/library.rs
+msgid "Close"
+msgstr ""
+
+#: src/ui/library.rs
+msgid "Move to Trash?"
+msgstr ""
+
+#: src/ui/library.rs
+#, rust-format
+msgid "“{title}” will be moved to the trash. You can restore it from there."
+msgstr ""
+
+#: src/ui/library.rs
+msgid "Could not move to the trash"
+msgstr ""
+
+#: src/ui/library.rs
+msgid "Recording moved to the trash"
+msgstr ""
+
+#: src/ui/library.rs
+msgid "No Recordings Yet"
+msgstr ""
+
+#: src/ui/library.rs
+msgid "Your recordings will appear here."
+msgstr ""
+
+#: src/ui/library.rs src/ui/main_window.rs
+msgid "My Recordings"
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "Record your screen or a window. Everything is saved locally."
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "Record Screen (Ctrl+Shift+R)"
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "Stop"
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "Stop (Ctrl+Shift+R)"
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "Pause or Resume (Ctrl+Shift+P)"
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "Microphone level"
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "Recent Recordings"
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "Open Recordings Folder"
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "See All"
+msgstr ""
+
+#: src/ui/main_window.rs src/ui/preferences.rs
+msgid "Preferences"
+msgstr ""
+
+#: src/ui/main_window.rs
+#, rust-format
+msgid "About {app}"
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "Main Menu"
+msgstr ""
+
+#. Translators: "Always on Top" and "Always on
+#. Visible Workspace" are GNOME's window menu
+#. items; use their names in your language.
+#: src/ui/main_window.rs
+msgid ""
+"Drag the bubble wherever you like. Press Alt+Space over it for “Always on "
+"Top” and “Always on Visible Workspace”"
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "Recording the screen"
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "Choose What to Record"
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "Select a screen or window in the system dialog."
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "Preparing…"
+msgstr ""
+
+#: src/ui/main_window.rs src/ui/preferences.rs
+msgid "Recording"
+msgstr ""
+
+#. Translators: "Stop Sharing" is the button in GNOME's
+#. top bar screen-sharing indicator.
+#: src/ui/main_window.rs
+msgid "Press Ctrl+Shift+R or “Stop Sharing” in the top bar to finish."
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "Paused"
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "Saving…"
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "Finishing the video file."
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "Recording saved"
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "OK"
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "Recording…"
+msgstr ""
+
+#: src/ui/main_window.rs
+msgid "Recording starts in a moment. Esc to cancel."
+msgstr ""
+
+#: src/ui/mod.rs
+msgid "Native screen recorder for GNOME and Wayland"
+msgstr ""
+
+#. Translators: replace with your name (and e-mail), one
+#. translator per line. It appears in the About dialog.
+#: src/ui/mod.rs
+msgid "translator-credits"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgctxt "video quality"
+msgid "Low (smaller files)"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgctxt "video quality"
+msgid "Medium"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgctxt "video quality"
+msgid "High"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgctxt "recording resolution"
+msgid "Original"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgctxt "recording resolution"
+msgid "Up to 1080p"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgctxt "recording resolution"
+msgid "Up to 720p (fewer resources)"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgctxt "video encoder"
+msgid "Automatic"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgctxt "video encoder"
+msgid "Hardware (GPU)"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgctxt "video encoder"
+msgid "Software (CPU)"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Pause or resume"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Cancel (discards the recording)"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Quit"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "General"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Countdown"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Seconds before recording starts (0 = no countdown)"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Show Pointer"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Video"
+msgstr ""
+
+#: src/ui/preferences.rs
+#, rust-format
+msgid "{fps} fps"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Frames per Second"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Maximum: fewer are recorded while the screen is still"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Quality"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Resolution"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Lower resolution: less CPU and smaller files"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Encoder"
+msgstr ""
+
+#. Translators: {encoder} is a GStreamer element name, {device}
+#. is "GPU" or "CPU".
+#: src/ui/preferences.rs
+#, rust-format
+msgid "In use: {encoder} ({device})"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "No H.264 encoder available"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "The device is chosen in the main window."
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Input Volume"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Percentage applied to the recording (100% = unchanged)"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Storage"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Recordings"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "They are only saved on your computer. Never sent to the Internet."
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Folder"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Change…"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Back to the default folder"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Recordings Folder"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Shortcuts"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "With the Reelix Window Focused"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "While recording, use the camera bubble buttons."
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Global Shortcuts"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid ""
+"They work even when Reelix is not focused (for example, recording with the "
+"window minimized). GNOME will ask you to confirm or change them."
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Enable Global Shortcuts"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Active"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Ctrl+Shift+R and Ctrl+Shift+P system-wide"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Disabled"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Waiting for GNOME to confirm…"
+msgstr ""
+
+#: src/ui/preferences.rs
+#, rust-format
+msgid "Active: {shortcuts}"
+msgstr ""
+
+#: src/ui/preferences.rs
+msgid "Not enabled (cancelled or unavailable)"
+msgstr ""

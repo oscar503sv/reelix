@@ -404,6 +404,29 @@ alineados, detener en pausa finaliza) y sin depender de cómo cada fuente
 viva maneje los cambios de estado. El tiempo transcurrido se calcula igual
 (running time − tiempo pausado).
 
+## Traducciones (0.8.0)
+
+- **gettext** (`gettext-rs` con la gettext del sistema, sin compilar la
+  incluida): es lo que usan GNOME, GTK y las herramientas de traducción
+  (Gtranslator, Poedit, Damned Lies, Weblate), y permite traducir con el
+  mismo `po/<idioma>.po` la interfaz, el `.desktop` y el metainfo
+  (`msgfmt --desktop` / `--xml`).
+- **Inglés como idioma fuente**: es el que entienden los traductores y el
+  que se muestra si falta una traducción. El español pasa a ser `po/es.po`.
+- **Marcadores con nombre** (`{path}`, `{date}`) en vez de `{}`
+  posicionales: el orden de las palabras cambia entre idiomas.
+- **Contextos** (`NC_`/`pgettext`) donde una palabra inglesa tiene dos
+  traducciones (“Medium”: tamaño *Mediana*, calidad *Media*).
+- **Fechas y tamaños**: formatos de fecha traducibles (validados para que una
+  traducción con un especificador inválido no haga entrar en pánico a
+  chrono), nombres de mes de GLib según el locale y `glib::format_size`
+  (separador decimal del idioma).
+- **Dónde están los `.mo`**: `$REELIX_LOCALEDIR`, luego
+  `<prefijo>/share/locale` junto al ejecutable (`/usr` en el RPM, `/app` en
+  Flatpak) y por último los que compila `build.rs` (desarrollo).
+- `setlocale` se llama al principio de `main`, antes de crear hilos: es el
+  único `unsafe` del proyecto.
+
 ## Investigación de plataforma (Fedora 44, GNOME 50, Intel Tiger Lake)
 
 | Tema | Conclusión |

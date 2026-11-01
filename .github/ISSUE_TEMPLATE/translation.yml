@@ -1,0 +1,22 @@
+name: Translation
+description: Report a translation mistake or announce that you are translating a language
+labels: [translation]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Translations are added and fixed with pull requests: see the
+        [translation guide](https://github.com/oscar503sv/reelix/blob/main/CONTRIBUTING.md#translations).
+        Opening this issue first avoids two people translating the same language.
+  - type: input
+    id: language
+    attributes:
+      label: Language and code
+      placeholder: French (fr)
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: The wrong text and the suggested one, or "I'm working on it".

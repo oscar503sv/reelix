@@ -11,6 +11,7 @@ pub mod branding;
 pub mod capture;
 pub mod config;
 pub mod error;
+pub mod i18n;
 pub mod recording;
 pub mod storage;
 pub mod ui;

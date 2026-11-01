@@ -1,0 +1,15 @@
+# Files with translatable strings. Keep sorted; po/update.sh checks it.
+data/io.github.oscar503sv.Reelix.desktop.in
+data/io.github.oscar503sv.Reelix.metainfo.xml.in
+src/app/controller.rs
+src/app/global_shortcuts.rs
+src/error.rs
+src/i18n.rs
+src/main.rs
+src/ui/audio_panel.rs
+src/ui/camera_bubble.rs
+src/ui/camera_panel.rs
+src/ui/library.rs
+src/ui/main_window.rs
+src/ui/mod.rs
+src/ui/preferences.rs

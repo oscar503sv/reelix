@@ -16,7 +16,7 @@ Grabador de pantalla nativo para GNOME y Wayland, al estilo de Loom.
 
 [English](README.md) · **Español**
 
-<img src="data/screenshots/main.png" width="300" alt="Ventana principal">&nbsp;&nbsp;<img src="data/screenshots/main-dark.png" width="300" alt="Ventana principal en modo oscuro">
+<img src="data/screenshots/es/main.png" width="300" alt="Ventana principal">&nbsp;&nbsp;<img src="data/screenshots/es/main-dark.png" width="300" alt="Ventana principal en modo oscuro">
 
 </div>
 
@@ -85,7 +85,7 @@ sudo dnf install ./reelix-0.7.1-1.fc44.x86_64.rpm
   un MP4 normal con el índice al principio.
 
 <div align="center">
-<img src="data/screenshots/library.png" width="420" alt="Mis grabaciones">&nbsp;&nbsp;<img src="data/screenshots/preferences.png" width="420" alt="Preferencias">
+<img src="data/screenshots/es/library.png" width="420" alt="Mis grabaciones">&nbsp;&nbsp;<img src="data/screenshots/es/preferences.png" width="420" alt="Preferencias">
 </div>
 
 ## 🧰 Requisitos
@@ -252,9 +252,23 @@ GTK4/libadwaita (UI) → Controller + máquina de estados → Portal ScreenCast 
 
 Detalles, decisiones y mediciones en [ARCHITECTURE.md](ARCHITECTURE.md).
 Guía de desarrollo en [DEVELOPMENT.md](DEVELOPMENT.md) y cómo colaborar en
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.es.md](CONTRIBUTING.es.md).
+
+## 🌍 Traducciones
+
+La interfaz está en **inglés** y **español** y sigue el idioma del sistema.
+
+| Idioma | Estado |
+|---|---|
+| Inglés | idioma original |
+| Español (`es`) | completo |
+
+Añadir un idioma es un solo archivo, `po/<código>.po`, enviado como pull
+request. La [guía de traducción](CONTRIBUTING.es.md#traducciones) explica
+cómo.
 
 ## 🗺️ Hoja de ruta
+
 
 - [x] **Fase 1**: GUI → portal → PipeWire → GStreamer → MP4.
 - [x] **Fase 2**: micrófono y audio del sistema (PipeWire) + AAC en el mismo MP4.
@@ -264,7 +278,8 @@ Guía de desarrollo en [DEVELOPMENT.md](DEVELOPMENT.md) y cómo colaborar en
 - [x] **Fase 6**: bajo consumo: burbuja en la GPU (19 % → 6 % de CPU) y resolución máxima.
 - [x] **Fase 7**: paquetes RPM y Flatpak, ícono definitivo, capturas y release 0.7.0.
 - [ ] Flathub y COPR.
-- [ ] Traducción de la interfaz al inglés.
+- [x] Interfaz en inglés y español, abierta a más idiomas (0.8.0).
+
 - [ ] Recordar la pantalla elegida (*restore tokens* del portal).
 
 ## 🎨 Identidad visual

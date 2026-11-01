@@ -15,6 +15,8 @@ use crate::capture::camera::{self as camera_capture, CameraAccess};
 use crate::capture::{CaptureRequest, ScreenCastSession, SourceKind, audio as audio_capture};
 use crate::config::Settings;
 use crate::error::AppError;
+use crate::i18n::{self, fill, gettext};
+
 use crate::recording::audio::{AacEncoderKind, AudioInput, AudioSourceElement};
 use crate::recording::camera::{CameraInput, CameraSource};
 use crate::recording::remux::Remux;
@@ -327,14 +329,14 @@ impl Controller {
             tracing::debug!(?microphones, "available microphones");
             if microphones.is_empty() {
                 tracing::warn!("no microphone found; recording without it");
-                self.notify("No se encontró ningún micrófono: se graba sin él.");
+                self.notify(&gettext("No microphone found: recording without it."));
                 inputs.retain(|input| !input.meter);
             } else if let Some(wanted) = &settings.audio.microphone_device {
                 if !microphones.iter().any(|m| &m.id == wanted) {
                     tracing::warn!(device = %wanted, "configured microphone missing; using default");
-                    self.notify(
-                        "El micrófono elegido no está conectado: se usa el predeterminado.",
-                    );
+                    self.notify(&gettext(
+                        "The selected microphone is not connected: using the default one.",
+                    ));
                     for input in inputs.iter_mut().filter(|i| i.meter) {
                         *input = AudioInput {
                             source: AudioSourceElement::Pulse { device: None },
@@ -351,7 +353,7 @@ impl Controller {
             Ok(encoder) => Some(AudioConfig { inputs, encoder }),
             Err(e) => {
                 tracing::error!(error = %e, "no AAC encoder; recording without audio");
-                self.notify("No hay codificador de audio AAC: se graba sin audio.");
+                self.notify(&gettext("No AAC audio encoder: recording without audio."));
                 None
             }
         }
@@ -368,7 +370,9 @@ impl Controller {
             Some(wanted.to_owned())
         } else {
             tracing::warn!(device = %wanted, "configured camera missing; using default");
-            self.notify("La cámara elegida no está conectada: se usa la predeterminada.");
+            self.notify(&gettext(
+                "The selected camera is not connected: using the default one.",
+            ));
             None
         }
     }
@@ -406,9 +410,13 @@ impl Controller {
             }
             PipelineEvent::SourceLost { source } => {
                 if source.starts_with(crate::recording::audio::AUDIO_SOURCE_PREFIX) {
-                    self.notify("Se perdió una fuente de audio; se guardó lo grabado.");
+                    self.notify(&gettext(
+                        "An audio source was lost; the recording so far was saved.",
+                    ));
                 } else if source == crate::recording::camera::CAMERA_SOURCE_NAME {
-                    self.notify("Se perdió la cámara; se guardó lo grabado.");
+                    self.notify(&gettext(
+                        "The camera was lost; the recording so far was saved.",
+                    ));
                 }
                 if self.state.borrow().is_capturing() {
                     self.apply(RecorderEvent::StopRequested);
@@ -493,7 +501,12 @@ impl Controller {
             .map(|d| d.as_secs_f64())
             .unwrap_or_else(|| (Local::now() - active.started_at).as_seconds_f64());
         let metadata = RecordingMetadata {
-            title: format!("Grabación {}", active.started_at.format("%d/%m/%Y %H:%M")),
+            title: fill(
+                // Translators: default title of a new recording; {date} is
+                // the date and time it started.
+                &gettext("Recording {date}"),
+                &[("date", &i18n::date_time(&active.started_at))],
+            ),
             created_at: active.started_at,
             duration,
             resolution: active

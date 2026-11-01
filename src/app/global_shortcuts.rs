@@ -14,6 +14,7 @@ use ashpd::desktop::{ResponseError, Session};
 
 use crate::branding;
 use crate::error::{AppError, Result};
+use crate::i18n::gettext;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShortcutAction {
@@ -35,10 +36,10 @@ impl ShortcutAction {
         Self::ALL.into_iter().find(|a| a.id() == id)
     }
 
-    fn description(self) -> &'static str {
+    fn description(self) -> String {
         match self {
-            Self::ToggleRecording => "Empezar o detener la grabación",
-            Self::TogglePause => "Pausar o reanudar la grabación",
+            Self::ToggleRecording => gettext("Start or stop recording"),
+            Self::TogglePause => gettext("Pause or resume recording"),
         }
     }
 

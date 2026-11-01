@@ -54,40 +54,23 @@ pub fn format_duration(seconds: f64) -> String {
     }
 }
 
-/// Day label for the library: "Hoy", "Ayer", or "20 oct" ("20 oct 2025" in
-/// another year).
-pub fn relative_day(date: chrono::NaiveDate, today: chrono::NaiveDate) -> String {
-    const MONTHS: [&str; 12] = [
-        "ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sept", "oct", "nov", "dic",
-    ];
-    use chrono::Datelike;
-    match (today - date).num_days() {
-        0 => "Hoy".to_owned(),
-        1 => "Ayer".to_owned(),
-        _ => {
-            let month = MONTHS[date.month0() as usize];
-            if date.year() == today.year() {
-                format!("{} {month}", date.day())
-            } else {
-                format!("{} {month} {}", date.day(), date.year())
-            }
-        }
-    }
+/// How long ago a recording was made, for the library's day label
+/// ("Today", "Yesterday", "Oct 20", "Dec 31, 2025"; the UI translates it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelativeDay {
+    Today,
+    Yesterday,
+    ThisYear,
+    OtherYear,
 }
 
-/// Human readable file size: "834 KB", "12,4 MB", "1,2 GB".
-pub fn format_size(bytes: u64) -> String {
-    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1000.0 && unit < UNITS.len() - 1 {
-        value /= 1000.0;
-        unit += 1;
-    }
-    if unit <= 1 {
-        format!("{} {}", value.round(), UNITS[unit])
-    } else {
-        format!("{value:.1} {}", UNITS[unit]).replace('.', ",")
+pub fn relative_day(date: chrono::NaiveDate, today: chrono::NaiveDate) -> RelativeDay {
+    use chrono::Datelike;
+    match (today - date).num_days() {
+        0 => RelativeDay::Today,
+        1 => RelativeDay::Yesterday,
+        _ if date.year() == today.year() => RelativeDay::ThisYear,
+        _ => RelativeDay::OtherYear,
     }
 }
 
@@ -140,18 +123,19 @@ mod tests {
         use chrono::NaiveDate;
         let today = NaiveDate::from_ymd_opt(2026, 10, 23).expect("date");
         let day = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).expect("date");
-        assert_eq!(relative_day(day(2026, 10, 23), today), "Hoy");
-        assert_eq!(relative_day(day(2026, 10, 22), today), "Ayer");
-        assert_eq!(relative_day(day(2026, 10, 20), today), "20 oct");
-        assert_eq!(relative_day(day(2025, 12, 31), today), "31 dic 2025");
-    }
-
-    #[test]
-    fn sizes() {
-        assert_eq!(format_size(512), "512 B");
-        assert_eq!(format_size(834_000), "834 KB");
-        assert_eq!(format_size(12_400_000), "12,4 MB");
-        assert_eq!(format_size(1_230_000_000), "1,2 GB");
+        assert_eq!(relative_day(day(2026, 10, 23), today), RelativeDay::Today);
+        assert_eq!(
+            relative_day(day(2026, 10, 22), today),
+            RelativeDay::Yesterday
+        );
+        assert_eq!(
+            relative_day(day(2026, 10, 20), today),
+            RelativeDay::ThisYear
+        );
+        assert_eq!(
+            relative_day(day(2025, 12, 31), today),
+            RelativeDay::OtherYear
+        );
     }
 
     #[test]

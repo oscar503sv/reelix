@@ -1,20 +1,19 @@
 [Desktop Entry]
 Type=Application
+# Translators: the app name; leave it untranslated (empty).
 Name=Reelix
 GenericName=Screen Recorder
-GenericName[es]=Grabador de pantalla
 Comment=Record your screen, a window, your microphone and webcam
-Comment[es]=Graba tu pantalla, una ventana, tu micrófono y tu cámara
 Exec=reelix
 Icon=io.github.oscar503sv.Reelix
 Terminal=false
 Categories=GTK;GNOME;AudioVideo;Video;Recorder;
-Keywords=screencast;screen;record;recorder;video;loom;grabar;pantalla;
+# Translators: search terms, separated and ended by semicolons.
+Keywords=screencast;screen;record;recorder;video;loom;
 StartupNotify=true
 DBusActivatable=false
 Actions=record;
 
 [Desktop Action record]
 Name=Record Screen
-Name[es]=Grabar pantalla
 Exec=reelix --record

@@ -8,6 +8,7 @@ use adw::prelude::*;
 
 use crate::app::Controller;
 use crate::capture::audio::{AudioDevice, list_microphones};
+use crate::i18n::gettext;
 
 pub struct AudioPanel {
     group: adw::PreferencesGroup,
@@ -19,19 +20,19 @@ impl AudioPanel {
         let devices = list_microphones();
 
         let microphone = adw::SwitchRow::builder()
-            .title("Micrófono")
+            .title(gettext("Microphone"))
             .active(settings.microphone)
             .build();
         microphone.add_prefix(&gtk::Image::from_icon_name(
             "audio-input-microphone-symbolic",
         ));
 
-        let labels: Vec<String> = std::iter::once("Predeterminado del sistema".to_owned())
+        let labels: Vec<String> = std::iter::once(gettext("System Default"))
             .chain(devices.iter().map(|d| d.label.clone()))
             .collect();
         let model = gtk::StringList::new(&labels.iter().map(String::as_str).collect::<Vec<_>>());
         let device_row = adw::ComboRow::builder()
-            .title("Dispositivo")
+            .title(gettext("Device"))
             .model(&model)
             .selected(selected_index(
                 &devices,
@@ -41,14 +42,14 @@ impl AudioPanel {
             .build();
 
         let system_audio = adw::SwitchRow::builder()
-            .title("Audio del sistema")
-            .subtitle("Lo que suena en tus altavoces o auriculares")
+            .title(gettext("System Audio"))
+            .subtitle(gettext("What plays through your speakers or headphones"))
             .active(settings.system_audio)
             .build();
         system_audio.add_prefix(&gtk::Image::from_icon_name("audio-speakers-symbolic"));
 
         let group = adw::PreferencesGroup::builder()
-            .title("Audio")
+            .title(gettext("Audio"))
             .margin_bottom(24)
             .build();
         group.add(&microphone);

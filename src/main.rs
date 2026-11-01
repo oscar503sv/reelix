@@ -5,6 +5,7 @@ use tracing_subscriber::EnvFilter;
 
 use reelix::branding;
 use reelix::config::Settings;
+use reelix::i18n::{self, fill, gettext};
 use reelix::storage::{Library, format_duration};
 use reelix::ui::{self, LaunchOptions};
 
@@ -32,9 +33,16 @@ fn main() -> ExitCode {
                 .unwrap_or_else(|_| EnvFilter::new("info,zbus=warn,zbus::proxy=error")),
         )
         .init();
+    i18n::init();
 
     if is_root() {
-        eprintln!("{} no debe ejecutarse como root.", branding::APP_NAME);
+        eprintln!(
+            "{}",
+            fill(
+                &gettext("{app} must not be run as root."),
+                &[("app", &branding::APP_NAME)]
+            )
+        );
         return ExitCode::FAILURE;
     }
 
@@ -59,7 +67,13 @@ fn list_recordings() -> ExitCode {
     let library = Library::new(Settings::load_or_default().recording_dir());
     match library.list() {
         Ok(recordings) if recordings.is_empty() => {
-            println!("No hay grabaciones en {}", library.dir().display());
+            println!(
+                "{}",
+                fill(
+                    &gettext("No recordings in {dir}"),
+                    &[("dir", &library.dir().display())]
+                )
+            );
             ExitCode::SUCCESS
         }
         Ok(recordings) => {
