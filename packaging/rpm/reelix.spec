@@ -6,7 +6,7 @@
 %global cargo_install_lib 0
 
 Name:           reelix
-Version:        0.7.0
+Version:        0.7.1
 Release:        1%{?dist}
 Summary:        Screen recorder for GNOME with microphone, system audio and camera bubble
 
@@ -92,5 +92,8 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/io.github.oscar503sv.
 %{_datadir}/icons/hicolor/*/apps/io.github.oscar503sv.Reelix*
 
 %changelog
+* Sun Nov 01 2026 Oscar Aragon <oscararagon.hdz@gmail.com> - 0.7.1-1
+- App icon in the main window, screenshots in the metainfo
+
 * Sun Nov 01 2026 Oscar Aragon <oscararagon.hdz@gmail.com> - 0.7.0-1
 - First RPM release

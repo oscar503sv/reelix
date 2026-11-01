@@ -40,14 +40,14 @@ Paquetes en la [última release](https://github.com/oscar503sv/reelix/releases/l
 **Flatpak** (cualquier distribución con Flathub configurado):
 
 ```bash
-flatpak install --user ./reelix-0.7.0.flatpak
+flatpak install --user ./reelix-0.7.1.flatpak
 flatpak run io.github.oscar503sv.Reelix
 ```
 
 **RPM** (Fedora 44):
 
 ```bash
-sudo dnf install ./reelix-0.7.0-1.fc44.x86_64.rpm
+sudo dnf install ./reelix-0.7.1-1.fc44.x86_64.rpm
 ```
 
 > No instales a la vez el RPM y el Flatpak: comparten ID y GNOME mostraría solo uno.

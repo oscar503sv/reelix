@@ -387,7 +387,7 @@ CPU 5–8 % en reposo con burbuja y 11–14 % grabando; 0 frames descartados.
 - **RPM**: `packaging/rpm/reelix.spec` con los macros de Fedora
   (`cargo-rpm-macros`) y crates vendorizados; `%check` corre la suite de tests.
 - **Flatpak**: `packaging/flatpak/io.github.oscar503sv.Reelix.yml`, runtime
-  GNOME 50. Permisos mínimos: `wayland`, `fallback-x11`, `ipc`, `dri`,
+  GNOME 51. Permisos mínimos: `wayland`, `fallback-x11`, `ipc`, `dri`,
   `pulseaudio` y `xdg-videos`. Pantalla y cámara llegan por portales.
 - Dentro de Flatpak no se llama a `register_host_app` (es solo para apps sin
   sandbox; el portal identifica a la app por su sandbox).

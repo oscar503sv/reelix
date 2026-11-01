@@ -43,14 +43,14 @@ Packages are attached to the [latest release](https://github.com/oscar503sv/reel
 **Flatpak** (any distribution with Flathub set up):
 
 ```bash
-flatpak install --user ./reelix-0.7.0.flatpak
+flatpak install --user ./reelix-0.7.1.flatpak
 flatpak run io.github.oscar503sv.Reelix
 ```
 
 **RPM** (Fedora 44):
 
 ```bash
-sudo dnf install ./reelix-0.7.0-1.fc44.x86_64.rpm
+sudo dnf install ./reelix-0.7.1-1.fc44.x86_64.rpm
 ```
 
 > Don't install the RPM and the Flatpak at the same time: they share an app

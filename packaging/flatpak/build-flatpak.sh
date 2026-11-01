@@ -5,8 +5,8 @@
 #   packaging/flatpak/build-flatpak.sh            # build + install + bundle
 #   packaging/flatpak/build-flatpak.sh --no-install
 #
-# Needs: flatpak-builder, org.gnome.Platform//50, org.gnome.Sdk//50 and
-# org.freedesktop.Sdk.Extension.rust-stable//25.08 (from Flathub).
+# Needs: flatpak-builder, org.gnome.Platform//51, org.gnome.Sdk//51 and
+# org.freedesktop.Sdk.Extension.rust-stable//26.08 (from Flathub).
 set -euo pipefail
 
 ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)

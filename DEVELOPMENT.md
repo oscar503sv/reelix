@@ -127,8 +127,8 @@ licencias de los crates enlazados (`%cargo_license_summary` en el log).
 
 ```bash
 sudo dnf install flatpak-builder
-flatpak install --user flathub org.gnome.Platform//50 org.gnome.Sdk//50 \
-    org.freedesktop.Sdk.Extension.rust-stable//25.08
+flatpak install --user flathub org.gnome.Platform//51 org.gnome.Sdk//51 \
+    org.freedesktop.Sdk.Extension.rust-stable//26.08
 packaging/flatpak/build-flatpak.sh    # construye, instala (usuario) y crea target/flatpak/reelix.flatpak
 ```
 

@@ -6,11 +6,11 @@
 # For Flathub, replace the `dir` source with the tagged release:
 #   - type: git
 #     url: https://github.com/oscar503sv/reelix.git
-#     tag: v0.7.0
+#     tag: v0.7.1
 #     commit: <sha>
 id: io.github.oscar503sv.Reelix
 runtime: org.gnome.Platform
-runtime-version: '50'
+runtime-version: '51'
 sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable

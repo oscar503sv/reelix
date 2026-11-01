@@ -23,22 +23,22 @@
     <screenshot type="default">
       <caption>Record your screen with microphone, system audio and camera</caption>
       <caption xml:lang="es">Graba tu pantalla con micrófono, audio del sistema y cámara</caption>
-      <image>https://raw.githubusercontent.com/oscar503sv/reelix/main/data/screenshots/main.png</image>
+      <image>https://raw.githubusercontent.com/oscar503sv/reelix/e7f139bf3add345f4ec70f0d49cd6e7f01f388e1/data/screenshots/main.png</image>
     </screenshot>
     <screenshot>
       <caption>Your recordings, stored on your computer</caption>
       <caption xml:lang="es">Tus grabaciones, guardadas en tu equipo</caption>
-      <image>https://raw.githubusercontent.com/oscar503sv/reelix/main/data/screenshots/library.png</image>
+      <image>https://raw.githubusercontent.com/oscar503sv/reelix/e7f139bf3add345f4ec70f0d49cd6e7f01f388e1/data/screenshots/library.png</image>
     </screenshot>
     <screenshot>
       <caption>Frame rate, quality, resolution and encoder</caption>
       <caption xml:lang="es">Fotogramas, calidad, resolución y codificador</caption>
-      <image>https://raw.githubusercontent.com/oscar503sv/reelix/main/data/screenshots/preferences.png</image>
+      <image>https://raw.githubusercontent.com/oscar503sv/reelix/e7f139bf3add345f4ec70f0d49cd6e7f01f388e1/data/screenshots/preferences.png</image>
     </screenshot>
     <screenshot>
       <caption>Dark style</caption>
       <caption xml:lang="es">Estilo oscuro</caption>
-      <image>https://raw.githubusercontent.com/oscar503sv/reelix/main/data/screenshots/main-dark.png</image>
+      <image>https://raw.githubusercontent.com/oscar503sv/reelix/e7f139bf3add345f4ec70f0d49cd6e7f01f388e1/data/screenshots/main-dark.png</image>
     </screenshot>
   </screenshots>
   <branding>
@@ -48,6 +48,7 @@
   <launchable type="desktop-id">io.github.oscar503sv.Reelix.desktop</launchable>
   <url type="homepage">https://github.com/oscar503sv/reelix</url>
   <url type="bugtracker">https://github.com/oscar503sv/reelix/issues</url>
+  <url type="vcs-browser">https://github.com/oscar503sv/reelix</url>
   <content_rating type="oars-1.1"/>
   <requires>
     <display_length compare="ge">360</display_length>
@@ -57,6 +58,11 @@
     <control>pointing</control>
   </supports>
   <releases>
+    <release version="0.7.1" date="2026-11-01">
+      <description>
+        <p>The main window shows the new app icon, and the app moves to the GNOME 51 platform.</p>
+      </description>
+    </release>
     <release version="0.7.0" date="2026-11-01">
       <description>
         <p>Low resource usage: the camera bubble is processed on the GPU (about a third of the CPU it used), and a maximum recording resolution setting.</p>
