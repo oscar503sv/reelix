@@ -35,7 +35,7 @@
 | `capture::camera` | Acceso a la cámara por el portal Camera y enumeración de cámaras. | ashpd, GStreamer |
 | `capture::audio` | Enumeración de micrófonos (DeviceMonitor) y traducción de ajustes a entradas de audio. | GStreamer |
 | `recording::encoder` | Detección y configuración del encoder H.264. | GStreamer |
-| `recording::camera` | Composición de la cámara: geometría de la burbuja, máscara circular, compositor. | GStreamer |
+| `recording::camera` | Composición de la cámara: geometría de la burbuja, máscara circular, compositor; cadena de vista previa (GPU/CPU). | GStreamer |
 | `recording::audio` | Rama de audio: fuentes, mezcla, limitador, AAC, medidor de nivel. | GStreamer |
 | `recording::pipeline` | Construcción y control del pipeline, eventos del bus. | GStreamer |
 | `storage` | Nombres de archivo, metadatos JSON, biblioteca (listar/renombrar/borrar). | No |
@@ -225,32 +225,52 @@ una grabación de pantalla completa ya la captura, así que no se compone (y se
 ahorra el coste del compositor). Se compone al grabar una sola ventana, que
 no incluiría la burbuja.
 
-## Burbuja de cámara (Fase 4)
+## Burbuja de cámara (Fase 4, optimizada en la Fase 6)
 
 ```
-portal Camera → pipewiresrc → raw → aspectratiocrop → [videoflip] → videoscale
-  → BGRA 2× + máscara alfa (círculo | rectángulo redondeado) → queue → gtk4paintablesink → gtk::Picture
+portal Camera → pipewiresrc → raw → vapostproc → DMA-BUF RGBx (GPU)  ─┐
+                                 └→ videoconvert → BGRx (sin VA-API)   ─┴→ queue → gtk4paintablesink → BubbleVideo
 ```
 
-Ventana GTK sin decoración, arrastrable (`gdk::Toplevel::begin_move`), con un
-borde "camaleón" animado por CSS (`@keyframes` sobre `border-color`, lo
-dibuja GTK). Al pasar el ratón durante la grabación muestra ● REC, el tiempo
-y un botón Detener. La ventana principal se minimiza 600 ms después de
-empezar (antes, GNOME la restauraba al cerrar el diálogo modal del portal).
+Ventana GTK sin decoración, arrastrable (`gdk::Toplevel::begin_move`). Al
+pasar el ratón durante la grabación muestra ● REC, el tiempo y un botón
+Detener. La ventana principal se minimiza 600 ms después de empezar (antes,
+GNOME la restauraba al cerrar el diálogo modal del portal).
+
+**Todo el trabajo de imagen en la GPU (Fase 6).** Los frames llegan a GTK en
+el tamaño de la cámara (640×480) y `ui::bubble_video::BubbleVideo` (widget
+propio) los dibuja en una sola pasada: recorte "cover", escalado, espejo
+(transformación), forma (`push_rounded_clip`) y el borde camaleón
+(`append_border`, color calculado al dibujar). Solo redibuja cuando llega un
+frame: ya no hay animación CSS que mantenga el reloj de GTK (y gnome-shell)
+a la frecuencia del monitor.
+
+- GTK 4.22 **convierte en CPU** las texturas YUV en memoria del sistema (siete
+  hilos `pool-*`, ~13 % de CPU con YUY2 640×480). Por eso nunca se le entrega
+  YUV: con VA-API, `vapostproc` convierte en la GPU a un DMA-BUF RGB que GTK
+  importa sin copias; sin VA-API, `videoconvert` a BGRx (GTK lo sube tal cual).
+- El formato DMA-BUF se elige cruzando los que ofrece `vapostproc` (RGB con
+  modificador *tiled*) con `gdk::Display::dmabuf_formats()`. Si la vista
+  previa por GPU falla en ejecución, se reintenta una vez por CPU.
+- `vapostproc` exige que el receptor acepte `VideoMeta` para exportar
+  DMA-BUF (el test lo anuncia en su `fakesink`, como hace `gtk4paintablesink`).
+
+| Burbuja visible, app en reposo | CPU Reelix | CPU extra gnome-shell |
+|---|---|---|
+| Fase 5 (BGRA + máscara en CPU, CSS a 60 fps) | 19,1 % | ≈ 22 % |
+| YUY2 directo a GTK | 21,4 % | ≈ 7 % |
+| BGRx en CPU (respaldo) | ≈ 8,5 % | — |
+| **DMA-BUF desde `vapostproc` (actual)** | **5,8 %** | **≈ 8 %** |
+| Sin cámara | 0,1 % | — |
+
+Lecciones de la Fase 4 (anteriores a la optimización):
 
 Lecciones de la prueba real, cada una con su test:
 
-- **GTK no recorta el vídeo al borde redondeado** (`overflow: hidden` no
-  aplica el radio al contenido), así que la forma se recorta en los propios
-  frames con la misma máscara alfa del compositor. En BGRA el color se
-  premultiplica: los píxeles transparentes quedan a cero sea cual sea la
-  interpretación del consumidor.
-- **`gtk4paintablesink` rellena las filas** (stride > ancho × 4): la máscara
-  se aplica fila a fila según `VideoMeta`, o deduciendo el stride del tamaño
-  del buffer.
-- **`pipewiresrc` anuncia caps ANY** y `aspectratiocrop` no enlaza desde ahí:
-  un capsfilter `video/x-raw` va primero (`build_preview_chain`, cubierto con
-  `videotestsrc` y con la cámara real).
+- **La máscara alfa en CPU** (hoy solo la usa el compositor de grabación)
+  debe respetar el relleno de filas de `VideoMeta` (stride > ancho × 4).
+- **`pipewiresrc` anuncia caps ANY**: un capsfilter `video/x-raw` va primero
+  (`build_preview_chain`, cubierto con `videotestsrc` y con la cámara real).
 - **Temas de usuario.** `~/.config/gtk-4.0/gtk.css` se aplica con prioridad
   USER, por encima de la de la app; un tema con `window { background-color }`
   translúcido pintaba la burbuja. Su CSS se carga con prioridad USER + 1 (solo
@@ -348,10 +368,19 @@ con la burbuja visible y **16 % grabando** (pico 25 %); RAM máxima 177 MB;
 0 frames descartados; archivo de 7,3 MB. Antes de la Fase 5 (build debug y
 software): ~90 % y 232 MB.
 
-Lo que queda del coste es sobre todo la **burbuja** (vista previa a 30 fps,
-conversión a BGRA y máscara en CPU, animación del borde). Posible mejora:
-convertir en la GPU y entregar DMA-BUF a `gtk4paintablesink`, aplicando la
-forma con un recorte de GTK en vez de la máscara.
+Lo que quedaba del coste era sobre todo la **burbuja**; la Fase 6 lo bajó
+de 19 % a 6 % (ver «Burbuja de cámara»). La pantalla ya llega como DMA-BUF
+(`AR24` tiled) y `vapostproc` la convierte sin pasar por la CPU.
+
+**Resolución máxima (Fase 6).** *Preferencias → Vídeo → Resolución*
+(Original / 1080p / 720p). El tamaño de salida se calcula al negociar el
+primer frame (`pipeline::output_size`, par y con la misma proporción); la
+cámara compuesta se coloca antes de escalar, en coordenadas de la captura.
+Con VA-API el escalado lo hace `vapostproc` gratis; en CPU, a 720p el
+codificador tarda la mitad por frame (13 → 7 ms) y la RAM baja ~20 MB.
+
+App real tras la Fase 6 (pantalla completa + burbuja + micrófono, 29 s):
+CPU 5–8 % en reposo con burbuja y 11–14 % grabando; 0 frames descartados.
 
 ## Investigación de plataforma (Fedora 44, GNOME 50, Intel Tiger Lake)
 

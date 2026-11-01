@@ -296,6 +296,7 @@ impl Controller {
             fps: settings.video.fps,
             bits_per_pixel: settings.video.quality.bits_per_pixel(),
             encoder,
+            max_height: settings.video.resolution.max_height(),
         };
 
         let weak = Rc::downgrade(self);

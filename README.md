@@ -36,8 +36,11 @@ ScreenCast de XDG, PipeWire y GStreamer.
   aparece en el vídeo; Esc la cancela).
 - **Mis grabaciones**: reproducir, renombrar, mostrar en la carpeta, copiar
   el archivo al portapapeles, ver detalles y mover a la papelera.
-- **Preferencias**: cuenta atrás, fps, calidad, codificador (muestra el que
-  se usa), puntero, volumen del micrófono, carpeta y atajos.
+- **Preferencias**: cuenta atrás, fps, calidad, resolución máxima (720p para
+  equipos modestos), codificador (muestra el que se usa), puntero, volumen
+  del micrófono, carpeta y atajos.
+- **Pocos recursos**: la burbuja se procesa en la GPU (≈ 6 % de CPU) y sin
+  cámara la app en reposo no consume nada (0,1 %).
 - **Atajos globales** opcionales (portal GlobalShortcuts): funcionan sin que
   Reelix tenga el foco.
 - Cronómetro en vivo, botón **Detener**, **Esc** cancela y descarta.
@@ -205,6 +208,7 @@ Detalles y decisiones en [ARCHITECTURE.md](ARCHITECTURE.md).
 - [x] **Fase 3**: cámara (portal Camera) + composición en el pipeline.
 - [x] **Fase 4**: burbuja/overlay, pausa, cuenta atrás, biblioteca, preferencias, atajos globales (pendientes de verificar en uso real).
 - [x] **Fase 5**: medición (estadísticas, benchmark) y optimización: sin relleno en los MP4, codificación y conversión de color en la GPU.
+- [x] **Fase 6**: bajo consumo: burbuja en la GPU (19 % → 6 % de CPU) y resolución máxima configurable.
 - [ ] Empaquetado RPM y Flatpak.
 
 ## Licencia

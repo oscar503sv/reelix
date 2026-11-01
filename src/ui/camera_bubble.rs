@@ -8,12 +8,11 @@
 //! window menu (Alt+Space).
 //!
 //! ```text
-//! portal Camera → pipewiresrc → crop (1:1 | 4:3) → [videoflip] → scale
-//!   → BGRA + alpha mask (circle | rounded rect) → queue → gtk4paintablesink → gtk::Picture
+//! portal Camera → pipewiresrc → queue → gtk4paintablesink → BubbleVideo
 //! ```
-//! GTK does not clip the video to the frame's rounded border, so the shape
-//! is cut into the frames themselves with the same alpha mask the recording
-//! compositor uses. Frames are 2× the bubble's logical size to stay sharp.
+//! Frames are not touched on the CPU: they reach GTK in the camera's own
+//! format and `BubbleVideo` crops, mirrors, clips and borders them on the
+//! GPU, redrawing only when a new frame arrives (see `bubble_video`).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -27,10 +26,11 @@ use gtk::{gdk, glib};
 use crate::capture::camera::CameraAccess;
 use crate::config::{CameraSettings, CameraShape, CameraSize};
 use crate::error::{AppError, Result};
-use crate::recording::camera::{PreviewSpec, build_preview_chain, circle_mask, rounded_rect_mask};
+use crate::recording::camera::{PreviewOutput, build_preview_chain, va_rgb_dmabuf_formats};
 use crate::storage::format_duration;
+use crate::ui::bubble_video::BubbleVideo;
 
-/// Chameleon border: the colour drifts through the GNOME palette.
+/// Transparent bubble window; see `bubble_video` for the border.
 pub const CSS: &str = r#"
 window.reelix-bubble,
 window.reelix-bubble.background {
@@ -38,19 +38,16 @@ window.reelix-bubble.background {
     background-color: transparent;
     box-shadow: none;
 }
+/* The border is drawn by BubbleVideo; the radius here only clips the
+   overlaid controls. */
 .reelix-bubble-frame {
     background: none;
-    border: 4px solid #3584e4;
-    animation: reelix-chameleon 12s linear infinite;
 }
 .reelix-bubble-frame.circle {
     border-radius: 9999px;
 }
 .reelix-bubble-frame.rectangle {
     border-radius: 18px;
-}
-.reelix-bubble-frame picture {
-    background: none;
 }
 .reelix-bubble-controls {
     margin-bottom: 14px;
@@ -66,21 +63,12 @@ window.reelix-bubble.background {
 .reelix-rec-dot {
     color: #ff5f5f;
 }
-@keyframes reelix-chameleon {
-    0%   { border-color: #3584e4; }
-    17%  { border-color: #2190a4; }
-    33%  { border-color: #3a944a; }
-    50%  { border-color: #c88800; }
-    67%  { border-color: #ed5b00; }
-    83%  { border-color: #c061cb; }
-    100% { border-color: #3584e4; }
-}
 "#;
 
 pub struct CameraBubble {
     window: gtk::Window,
     frame: gtk::Overlay,
-    picture: gtk::Picture,
+    video: BubbleVideo,
     controls: gtk::Revealer,
     timer: gtk::Label,
     pause: gtk::Button,
@@ -88,6 +76,8 @@ pub struct CameraBubble {
     pipeline: RefCell<Option<(gst::Pipeline, gst::bus::BusWatchGuard)>>,
     access: RefCell<Option<CameraAccess>>,
     recording: Cell<bool>,
+    /// Set after the GPU preview failed once: use the CPU path from then on.
+    cpu_only: Cell<bool>,
     /// Bumped on every show/hide so a slow portal answer cannot resurrect a
     /// bubble that was hidden meanwhile.
     generation: Cell<u64>,
@@ -102,12 +92,9 @@ impl CameraBubble {
         on_pause: impl Fn() + 'static,
         on_closed: impl Fn() + 'static,
     ) -> Rc<Self> {
-        let picture = gtk::Picture::builder()
-            .content_fit(gtk::ContentFit::Cover)
-            .can_shrink(true)
-            .hexpand(true)
-            .vexpand(true)
-            .build();
+        let video = BubbleVideo::default();
+        video.set_hexpand(true);
+        video.set_vexpand(true);
 
         let timer = gtk::Label::builder()
             .label("0:00")
@@ -147,7 +134,7 @@ impl CameraBubble {
             .build();
 
         let frame = gtk::Overlay::builder()
-            .child(&picture)
+            .child(&video)
             .overflow(gtk::Overflow::Hidden)
             .css_classes(["reelix-bubble-frame"])
             .build();
@@ -175,7 +162,7 @@ impl CameraBubble {
         let this = Rc::new(Self {
             window,
             frame,
-            picture,
+            video,
             controls,
             timer,
             pause,
@@ -183,6 +170,7 @@ impl CameraBubble {
             pipeline: RefCell::new(None),
             access: RefCell::new(None),
             recording: Cell::new(false),
+            cpu_only: Cell::new(false),
             generation: Cell::new(0),
         });
         this.connect_drag();
@@ -224,8 +212,33 @@ impl CameraBubble {
             if this.generation.get() != generation {
                 return Ok(());
             }
-            let pipeline = build_preview(&access, &settings, &this.picture)?;
-            let watch = watch_errors(&pipeline)?;
+            let output = preview_output(this.cpu_only.get());
+            tracing::info!(?output, "camera preview path");
+            let pipeline = build_preview(&access, &settings, &this.video, &output)?;
+            let on_error = {
+                let weak = Rc::downgrade(&this);
+                let gpu = matches!(output, PreviewOutput::Dmabuf(_));
+                move || {
+                    let Some(this) = weak.upgrade() else { return };
+                    if !gpu || this.cpu_only.replace(true) {
+                        return;
+                    }
+                    tracing::warn!("GPU camera preview failed; retrying on the CPU");
+                    let settings = settings.clone();
+                    // Not from inside the bus watch being torn down.
+                    glib::idle_add_local_once(move || {
+                        if !this.is_shown() {
+                            return;
+                        }
+                        glib::spawn_future_local(async move {
+                            if let Err(e) = this.show(&settings).await {
+                                tracing::error!(error = %e, "camera preview fallback failed");
+                            }
+                        });
+                    });
+                }
+            };
+            let watch = watch_errors(&pipeline, on_error)?;
             ElementExt::set_state(&pipeline, gst::State::Playing)
                 .map_err(|e| AppError::Pipeline(format!("camera preview: {e}")))?;
             *this.pipeline.borrow_mut() = Some((pipeline, watch));
@@ -298,6 +311,11 @@ impl CameraBubble {
         };
         self.frame.remove_css_class(remove);
         self.frame.add_css_class(add);
+        self.video.set_radius(match settings.shape {
+            CameraShape::Circle => f32::INFINITY,
+            CameraShape::Rectangle => RECTANGLE_RADIUS as f32,
+        });
+        self.video.set_mirror(settings.mirror);
     }
 
     fn stop_pipeline(&self) {
@@ -321,7 +339,7 @@ impl CameraBubble {
             let button = i32::try_from(gesture.current_button()).unwrap_or(1);
             toplevel.begin_move(&device, button, x, y, gesture.current_event_time());
         });
-        self.picture.add_controller(gesture);
+        self.video.add_controller(gesture);
     }
 
     fn connect_hover(self: &Rc<Self>) {
@@ -344,8 +362,6 @@ impl CameraBubble {
 
 /// Corner radius of the rectangle bubble, in logical pixels (matches CSS).
 const RECTANGLE_RADIUS: i32 = 18;
-/// CSS border width in logical pixels.
-const BORDER: i32 = 4;
 
 /// Bubble size in logical pixels, border included.
 fn bubble_size(settings: &CameraSettings) -> (i32, i32) {
@@ -361,17 +377,24 @@ fn bubble_size(settings: &CameraSettings) -> (i32, i32) {
     (width, height)
 }
 
-/// Logs preview errors; a broken preview must never affect recording.
-fn watch_errors(pipeline: &gst::Pipeline) -> Result<gst::bus::BusWatchGuard> {
+/// Logs preview errors (calling `on_error`); a broken preview must never
+/// affect recording.
+fn watch_errors(
+    pipeline: &gst::Pipeline,
+    on_error: impl Fn() + 'static,
+) -> Result<gst::bus::BusWatchGuard> {
     let bus = ElementExt::bus(pipeline)
         .ok_or_else(|| AppError::Pipeline("camera preview has no bus".into()))?;
-    bus.add_watch_local(|_, msg| {
+    bus.add_watch_local(move |_, msg| {
         match msg.view() {
-            gst::MessageView::Error(err) => tracing::error!(
-                error = %err.error(),
-                details = ?err.debug(),
-                "camera preview error"
-            ),
+            gst::MessageView::Error(err) => {
+                tracing::error!(
+                    error = %err.error(),
+                    details = ?err.debug(),
+                    "camera preview error"
+                );
+                on_error();
+            }
             gst::MessageView::Warning(w) => {
                 tracing::warn!(warning = %w.error(), "camera preview warning")
             }
@@ -385,7 +408,8 @@ fn watch_errors(pipeline: &gst::Pipeline) -> Result<gst::bus::BusWatchGuard> {
 fn build_preview(
     access: &CameraAccess,
     settings: &CameraSettings,
-    picture: &gtk::Picture,
+    video: &BubbleVideo,
+    output: &PreviewOutput,
 ) -> Result<gst::Pipeline> {
     crate::recording::init()?;
     let source = gst::ElementFactory::make("pipewiresrc")
@@ -399,28 +423,23 @@ fn build_preview(
         .build()
         .map_err(|_| AppError::MissingElement("gtk4paintablesink".into()))?;
     let paintable = sink.property::<gdk::Paintable>("paintable");
-    picture.set_paintable(Some(&paintable));
-
-    // Video area inside the border, at 2× for HiDPI sharpness.
-    let (width, height) = bubble_size(settings);
-    let video_w = u32::try_from((width - 2 * BORDER) * 2).unwrap_or(400) & !1;
-    let video_h = u32::try_from((height - 2 * BORDER) * 2).unwrap_or(400) & !1;
-    let (aspect, mask) = match settings.shape {
-        CameraShape::Circle => ((1, 1), circle_mask(video_w)),
-        CameraShape::Rectangle => (
-            (4, 3),
-            // Inner radius = outer radius minus the border, doubled.
-            rounded_rect_mask(video_w, video_h, f64::from((RECTANGLE_RADIUS - BORDER) * 2)),
-        ),
-    };
-    let spec = PreviewSpec {
-        aspect,
-        width: video_w,
-        height: video_h,
-        mirror: settings.mirror,
-        mask,
-    };
+    video.set_paintable(Some(&paintable));
     let pipeline = gst::Pipeline::with_name("reelix-camera-preview");
-    build_preview_chain(&pipeline, source, sink, spec)?;
+    build_preview_chain(&pipeline, source, sink, output)?;
     Ok(pipeline)
+}
+
+/// GPU conversion into a DMA-BUF when VA-API can produce an RGB format GTK
+/// imports; otherwise (or after a failure) BGRx on the CPU.
+fn preview_output(cpu_only: bool) -> PreviewOutput {
+    if !cpu_only && let Some(display) = gdk::Display::default() {
+        let supported = display.dmabuf_formats();
+        if let Some((name, ..)) = va_rgb_dmabuf_formats()
+            .into_iter()
+            .find(|&(_, fourcc, modifier)| supported.contains(fourcc, modifier))
+        {
+            return PreviewOutput::Dmabuf(name);
+        }
+    }
+    PreviewOutput::SystemBgrx
 }

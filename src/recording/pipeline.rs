@@ -4,7 +4,8 @@
 //! pipewiresrc (portal fd + node id)
 //!   [→ compositor with the camera bubble (camera.rs)]
 //!   → videoconvert (BGRx → I420/NV12, multithreaded, no dithering)
-//!   → videoscale + capsfilter (output size fixed to the first negotiated size)
+//!   → videoscale + capsfilter (output size fixed to the first negotiated
+//!     size, optionally capped at `max_height`)
 //!   → videorate max-rate=fps (drop-only: never duplicates frames)
 //!   → queue (leaky, bounded: drops frames instead of growing RAM)
 //!   → H.264 encoder → h264parse ─┐
@@ -69,6 +70,8 @@ pub struct PipelineConfig {
     pub fps: u32,
     pub bits_per_pixel: f64,
     pub encoder: EncoderKind,
+    /// Downscale (keeping the aspect ratio) when taller than this.
+    pub max_height: Option<u32>,
 }
 
 /// Notifications delivered on the GLib main thread.
@@ -373,6 +376,21 @@ fn make_video_source(input: &VideoInput) -> Result<gst::Element> {
     }
 }
 
+/// Encoded size for a `width`×`height` capture: unchanged unless taller
+/// than `max_height`, then scaled down keeping the aspect ratio. Always
+/// even (4:2:0 encoders need it).
+pub fn output_size(width: u32, height: u32, max_height: Option<u32>) -> (u32, u32) {
+    let even = |v: u32| (v & !1).max(2);
+    match max_height {
+        Some(max) if height > max => {
+            let scaled =
+                (u64::from(width) * u64::from(max) + u64::from(height) / 2) / u64::from(height);
+            (even(u32::try_from(scaled).unwrap_or(width)), even(max))
+        }
+        _ => (even(width), even(height)),
+    }
+}
+
 /// `video/x-raw[(memory:…)], format=…[, width, height, pixel-aspect-ratio=1/1]`.
 fn raw_caps(format: &str, memory: Option<&str>, size: Option<(u32, u32)>) -> gst::Caps {
     let mut builder = gst::Caps::builder("video/x-raw").field("format", format);
@@ -443,6 +461,7 @@ fn install_size_lock(
     let size_filter = size_filter.downgrade();
     let encoder = encoder.downgrade();
     let (kind, fps, bpp) = (config.encoder, config.fps, config.bits_per_pixel);
+    let max_height = config.max_height;
 
     pad.add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, move |_, info| {
         let Some(gst::PadProbeData::Event(event)) = &info.data else {
@@ -465,18 +484,27 @@ fn install_size_lock(
         };
         let even = |v: i32| (u32::try_from(v).unwrap_or(2).max(2)) & !1;
         let (w, h) = (even(w), even(h));
-        tracing::info!(width = w, height = h, caps = %caps_event.caps(), "video stream negotiated");
+        let (out_w, out_h) = output_size(w, h, max_height);
+        tracing::info!(
+            width = w,
+            height = h,
+            output_width = out_w,
+            output_height = out_h,
+            caps = %caps_event.caps(),
+            "video stream negotiated"
+        );
 
         if let Some(filter) = size_filter.upgrade() {
-            filter.set_property("caps", raw_caps(format, memory, Some((w, h))));
+            filter.set_property("caps", raw_caps(format, memory, Some((out_w, out_h))));
         }
         if let Some(enc) = encoder.upgrade() {
-            kind.set_bitrate(&enc, target_bitrate(w, h, fps, bpp));
+            kind.set_bitrate(&enc, target_bitrate(out_w, out_h, fps, bpp));
         }
+        // The camera is composited before scaling, at the captured size.
         if let Some((pad, layout)) = &bubble {
             camera::position_bubble(pad, layout, w, h);
         }
-        *locked = Some((w, h));
+        *locked = Some((out_w, out_h));
         gst::PadProbeReturn::Remove
     })
     .ok_or_else(|| AppError::Pipeline("failed to install caps probe".into()))?;
@@ -560,4 +588,27 @@ fn install_bus_watch(
         gst::glib::ControlFlow::Continue
     })
     .map_err(|e| AppError::Pipeline(format!("failed to watch bus: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::output_size;
+
+    #[test]
+    fn output_size_keeps_small_captures() {
+        assert_eq!(output_size(1920, 1080, None), (1920, 1080));
+        assert_eq!(output_size(1920, 1080, Some(1080)), (1920, 1080));
+        assert_eq!(output_size(1280, 720, Some(1080)), (1280, 720));
+    }
+
+    #[test]
+    fn output_size_downscales_keeping_aspect() {
+        assert_eq!(output_size(1920, 1080, Some(720)), (1280, 720));
+        assert_eq!(output_size(2560, 1600, Some(1080)), (1728, 1080));
+        assert_eq!(output_size(3840, 2160, Some(720)), (1280, 720));
+        // Odd results are rounded to even.
+        assert_eq!(output_size(1366, 768, Some(720)), (1280, 720));
+        assert_eq!(output_size(1001, 1001, Some(720)), (720, 720));
+        assert_eq!(output_size(1280, 720, Some(480)), (852, 480));
+    }
 }

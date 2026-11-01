@@ -422,26 +422,71 @@ pub fn build(
     })
 }
 
-/// Shape and size of the camera preview frames (the on-screen bubble).
-#[derive(Debug, Clone)]
-pub struct PreviewSpec {
-    /// Width:height the camera image is cropped to.
-    pub aspect: (u32, u32),
-    pub width: u32,
-    pub height: u32,
-    pub mirror: bool,
-    /// Alpha mask (`width`×`height`) cut into every frame.
-    pub mask: Vec<u8>,
+/// How the bubble's preview frames are handed to GTK.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PreviewOutput {
+    /// `vapostproc` converts on the GPU into a DMA-BUF of this DRM format
+    /// (e.g. `"XB24:0x0100000000000002"`), which GTK imports without copies.
+    Dmabuf(String),
+    /// `videoconvert` to BGRx in system memory: the one CPU conversion GTK
+    /// can upload as-is (it converts YUV textures on the CPU, slowly).
+    SystemBgrx,
 }
 
-/// Builds `source → raw → crop → [flip] → scale → BGRA + mask → queue → sink`
-/// inside `pipeline`. Used by the on-screen bubble; the sink is a parameter
-/// so tests can use a fakesink.
+/// RGB DMA-BUF formats `vapostproc` can produce, best first, as
+/// (`drm-format` caps string, fourcc, modifier). Empty without VA-API.
+pub fn va_rgb_dmabuf_formats() -> Vec<(String, u32, u64)> {
+    const PREFERRED: [&str; 4] = ["XB24", "XR24", "AB24", "AR24"];
+    let Some(factory) = gst::ElementFactory::find("vapostproc") else {
+        return Vec::new();
+    };
+    let mut found: Vec<(String, u32, u64)> = factory
+        .static_pad_templates()
+        .iter()
+        .filter(|t| t.direction() == gst::PadDirection::Src)
+        .flat_map(|t| t.caps().iter().map(|s| s.to_owned()).collect::<Vec<_>>())
+        .filter_map(|s| s.get::<gst::List>("drm-format").ok())
+        .flat_map(|list| {
+            list.iter()
+                .filter_map(|v| v.get::<String>().ok())
+                .collect::<Vec<_>>()
+        })
+        .filter_map(|name| {
+            let (fourcc, modifier) = parse_drm_format(&name)?;
+            PREFERRED
+                .iter()
+                .any(|p| name.starts_with(p))
+                .then_some((name, fourcc, modifier))
+        })
+        .collect();
+    found.sort_by_key(|(name, ..)| PREFERRED.iter().position(|p| name.starts_with(p)));
+    found
+}
+
+/// Parses a GStreamer `drm-format` string (`"AB24:0x0100000000000002"`, or
+/// `"AB24"` for linear) into a DRM fourcc and modifier.
+pub fn parse_drm_format(value: &str) -> Option<(u32, u64)> {
+    let (code, modifier) = match value.split_once(':') {
+        Some((code, modifier)) => (
+            code,
+            u64::from_str_radix(modifier.strip_prefix("0x")?, 16).ok()?,
+        ),
+        None => (value, 0),
+    };
+    let bytes: [u8; 4] = code.as_bytes().try_into().ok()?;
+    Some((u32::from_le_bytes(bytes), modifier))
+}
+
+/// Builds `source → raw → convert → queue → sink` inside `pipeline`: the
+/// on-screen bubble's preview. Frames keep the camera's size (e.g.
+/// 640×480); GTK does the crop, mirror, scaling and round clip on the GPU
+/// when drawing (see `ui::bubble_video`). The sink is a parameter so tests
+/// can use a fakesink.
 pub fn build_preview_chain(
     pipeline: &gst::Pipeline,
     source: gst::Element,
     sink: gst::Element,
-    spec: PreviewSpec,
+    output: &PreviewOutput,
 ) -> Result<()> {
     isolate_negotiation(&source)?;
     let make = |factory: &str| {
@@ -449,48 +494,37 @@ pub fn build_preview_chain(
             .build()
             .map_err(|_| AppError::MissingElement(factory.to_owned()))
     };
-    // pipewiresrc advertises ANY caps (DMA-BUF included); aspectratiocrop
-    // cannot link from that, so pin system-memory raw video first.
+    // pipewiresrc advertises ANY caps; pin raw video so negotiation goes
+    // through the format list of `isolate_negotiation`.
     let raw = make("capsfilter")?;
     raw.set_property("caps", gst::Caps::new_empty_simple("video/x-raw"));
-    let crop = make("aspectratiocrop")?;
-    let (aw, ah) = spec.aspect;
-    crop.set_property(
-        "aspect-ratio",
-        gst::Fraction::new(
-            i32::try_from(aw).unwrap_or(1),
-            i32::try_from(ah).unwrap_or(1),
+    let (convert, caps) = match output {
+        PreviewOutput::Dmabuf(drm_format) => (
+            make("vapostproc")?,
+            gst::Caps::builder("video/x-raw")
+                .features(["memory:DMABuf"])
+                .field("format", "DMA_DRM")
+                .field("drm-format", drm_format.as_str())
+                .build(),
         ),
-    );
-    let flip = make("videoflip")?;
-    flip.set_property_from_str(
-        "method",
-        if spec.mirror {
-            "horizontal-flip"
-        } else {
-            "none"
-        },
-    );
-    let scale = make("videoscale")?;
-    let convert = make("videoconvert")?;
-    let caps = make("capsfilter")?;
-    caps.set_property(
-        "caps",
-        gst::Caps::builder("video/x-raw")
-            .field("format", "BGRA")
-            .field("width", i32::try_from(spec.width).unwrap_or(400))
-            .field("height", i32::try_from(spec.height).unwrap_or(400))
-            .field("pixel-aspect-ratio", gst::Fraction::new(1, 1))
-            .build(),
-    );
-    install_alpha_mask(&caps, spec.mask, spec.width, spec.height, AlphaByte::Last)?;
+        PreviewOutput::SystemBgrx => (
+            make("videoconvert")?,
+            gst::Caps::builder("video/x-raw")
+                .field("format", "BGRx")
+                .build(),
+        ),
+    };
+    let converted = make("capsfilter")?;
+    converted.set_property("caps", caps);
+    // Never let a busy GTK main loop back-pressure the camera: keep only
+    // the newest frames.
     let queue = make("queue")?;
     queue.set_property("max-size-buffers", 2u32);
+    queue.set_property("max-size-bytes", 0u32);
+    queue.set_property("max-size-time", 0u64);
     queue.set_property_from_str("leaky", "downstream");
 
-    let chain = [
-        &source, &raw, &crop, &flip, &scale, &convert, &caps, &queue, &sink,
-    ];
+    let chain = [&source, &raw, &convert, &converted, &queue, &sink];
     pipeline
         .add_many(chain)
         .map_err(|e| AppError::Pipeline(e.to_string()))?;
@@ -819,6 +853,18 @@ mod tests {
         assert_eq!(at(0, h / 2), 255, "straight edge is kept");
         assert_eq!(at(w / 2, 0), 255, "straight edge is kept");
         assert_eq!(at(w / 2, h / 2), 255);
+    }
+
+    #[test]
+    fn drm_formats_parse_to_fourcc_and_modifier() {
+        let ab24 = u32::from_le_bytes(*b"AB24");
+        assert_eq!(
+            parse_drm_format("AB24:0x0100000000000002"),
+            Some((ab24, 0x0100_0000_0000_0002))
+        );
+        assert_eq!(parse_drm_format("AB24"), Some((ab24, 0)));
+        assert_eq!(parse_drm_format("AB2"), None);
+        assert_eq!(parse_drm_format("AB24:zz"), None);
     }
 
     #[test]

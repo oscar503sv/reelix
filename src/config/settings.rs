@@ -30,6 +30,30 @@ impl Quality {
     }
 }
 
+/// Largest output size. Downscaling a big screen cuts encoding work and
+/// file size; on the GPU path the scaling itself is free.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum Resolution {
+    #[default]
+    #[serde(rename = "original")]
+    Original,
+    #[serde(rename = "1080p")]
+    P1080,
+    #[serde(rename = "720p")]
+    P720,
+}
+
+impl Resolution {
+    /// Maximum output height, or `None` to keep the captured size.
+    pub fn max_height(self) -> Option<u32> {
+        match self {
+            Self::Original => None,
+            Self::P1080 => Some(1080),
+            Self::P720 => Some(720),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum EncoderPreference {
@@ -45,6 +69,7 @@ pub enum EncoderPreference {
 pub struct VideoSettings {
     pub fps: u32,
     pub quality: Quality,
+    pub resolution: Resolution,
     pub encoder: EncoderPreference,
     pub show_cursor: bool,
 }
@@ -54,6 +79,7 @@ impl Default for VideoSettings {
         Self {
             fps: 30,
             quality: Quality::default(),
+            resolution: Resolution::default(),
             encoder: EncoderPreference::default(),
             show_cursor: true,
         }

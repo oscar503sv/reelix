@@ -9,7 +9,7 @@ use gtk::gio;
 
 use super::shortcuts::ShortcutsManager;
 use crate::app::Controller;
-use crate::config::{EncoderPreference, Quality, Settings};
+use crate::config::{EncoderPreference, Quality, Resolution, Settings};
 use crate::recording::EncoderKind;
 
 const FPS_CHOICES: [u32; 4] = [15, 24, 30, 60];
@@ -17,6 +17,11 @@ const QUALITIES: [(Quality, &str); 3] = [
     (Quality::Low, "Baja (archivos pequeños)"),
     (Quality::Medium, "Media"),
     (Quality::High, "Alta"),
+];
+const RESOLUTIONS: [(Resolution, &str); 3] = [
+    (Resolution::Original, "Original"),
+    (Resolution::P1080, "1080p como máximo"),
+    (Resolution::P720, "720p como máximo (menos recursos)"),
 ];
 const ENCODERS: [(EncoderPreference, &str); 3] = [
     (EncoderPreference::Auto, "Automático"),
@@ -124,6 +129,21 @@ fn recording_page(controller: &Rc<Controller>, settings: &Settings) -> adw::Pref
             }
         });
     }
+    let resolution = combo(
+        "Resolución",
+        &labels(&RESOLUTIONS),
+        index_of(&RESOLUTIONS, settings.video.resolution),
+    );
+    resolution.set_subtitle("Menor resolución: menos CPU y archivos más pequeños");
+    {
+        let controller = Rc::clone(controller);
+        resolution.connect_selected_notify(move |row| {
+            if let Some((value, _)) = RESOLUTIONS.get(row.selected() as usize) {
+                let value = *value;
+                controller.update_settings(|s| s.video.resolution = value);
+            }
+        });
+    }
     let encoder = combo(
         "Codificador",
         &labels(&ENCODERS),
@@ -142,6 +162,7 @@ fn recording_page(controller: &Rc<Controller>, settings: &Settings) -> adw::Pref
     }
     video.add(&fps);
     video.add(&quality);
+    video.add(&resolution);
     video.add(&encoder);
 
     page.add(&general);

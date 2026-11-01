@@ -12,9 +12,10 @@ use gst::prelude::*;
 use reelix::config::EncoderPreference;
 use reelix::recording::audio::{AacEncoderKind, AudioInput, AudioSourceElement};
 use reelix::recording::camera::{
-    CameraInput, CameraLayout, CameraSource, Corner, PreviewSpec, Shape, build_preview_chain,
-    circle_mask,
+    CameraInput, CameraLayout, CameraSource, Corner, PreviewOutput, Shape, build_preview_chain,
+    va_rgb_dmabuf_formats,
 };
+use reelix::recording::pipeline::output_size;
 use reelix::recording::{
     AudioConfig, EncoderKind, PipelineConfig, PipelineEvent, RecordingPipeline, VideoInput,
 };
@@ -60,9 +61,21 @@ fn record_with(
     camera: Option<CameraInput>,
     output: &Path,
 ) -> Observed {
+    record_scaled(video, audio_inputs, camera, output, None)
+}
+
+fn record_scaled(
+    video: gst::Element,
+    audio_inputs: Vec<AudioInput>,
+    camera: Option<CameraInput>,
+    output: &Path,
+    max_height: Option<u32>,
+) -> Observed {
     let context = glib::MainContext::new();
     context
-        .with_thread_default(|| record_in_context(video, audio_inputs, camera, output, &context))
+        .with_thread_default(|| {
+            record_in_context(video, audio_inputs, camera, output, max_height, &context)
+        })
         .expect("acquire main context")
 }
 
@@ -71,6 +84,7 @@ fn record_in_context(
     audio_inputs: Vec<AudioInput>,
     camera: Option<CameraInput>,
     output: &Path,
+    max_height: Option<u32>,
     context: &glib::MainContext,
 ) -> Observed {
     let config = PipelineConfig {
@@ -84,6 +98,7 @@ fn record_in_context(
         fps: 30,
         bits_per_pixel: 0.08,
         encoder: EncoderKind::detect(EncoderPreference::Auto).expect("H.264 encoder"),
+        max_height,
     };
 
     let main_loop = glib::MainLoop::new(Some(context), false);
@@ -126,7 +141,10 @@ fn record_in_context(
     main_loop.run();
     stop_timer.abort();
     safety_timer.abort();
-    assert_eq!(pipeline.resolution(), Some((320, 240)));
+    assert_eq!(
+        pipeline.resolution(),
+        Some(output_size(320, 240, max_height))
+    );
     pipeline.abort();
     observed.take()
 }
@@ -513,30 +531,70 @@ fn real_camera_composition() {
     }
 }
 
-/// Runs the bubble's preview chain with `source` and returns the first BGRA
-/// frame it produces.
-fn first_preview_frame(source: gst::Element, size: u32) -> Vec<u8> {
+/// "720p max" style downscaling: a 320×240 capture capped at 120 lines is
+/// encoded at 160×120, with the camera still composited in place.
+#[test]
+fn max_height_downscales_the_recording() {
+    if !gst_ready() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let output = dir.path().join("scaled.mp4");
+    let camera = CameraInput {
+        source: CameraSource::Element(live("videotestsrc")),
+        layout: CameraLayout {
+            corner: Corner::BottomRight,
+            height_fraction: 0.25,
+            shape: Shape::Circle,
+            mirror: false,
+        },
+    };
+    let observed = record_scaled(
+        solid(0xff0000ff),
+        Vec::new(),
+        Some(camera),
+        &output,
+        Some(120),
+    );
+    assert!(observed.errors.is_empty(), "{:?}", observed.errors);
+    assert!(observed.finalized);
+    let frame = last_frame(&output);
+    assert_eq!((frame.width, frame.height), (160, 120));
+}
+
+/// First frame of the bubble's preview chain: (data, caps).
+fn first_preview_frame(source: gst::Element, output: &PreviewOutput) -> (Vec<u8>, gst::Caps) {
     use std::sync::mpsc;
     let pipeline = gst::Pipeline::new();
     let sink = gst::ElementFactory::make("fakesink")
         .property("signal-handoffs", true)
         .build()
         .expect("fakesink");
+    // Like gtk4paintablesink, accept VideoMeta: vapostproc refuses to
+    // export DMA-BUFs to a peer that does not.
+    sink.static_pad("sink").expect("sink pad").add_probe(
+        gst::PadProbeType::QUERY_DOWNSTREAM,
+        |_, info| {
+            if let Some(gst::PadProbeData::Query(query)) = info.data.as_mut()
+                && let gst::QueryViewMut::Allocation(allocation) = query.view_mut()
+            {
+                allocation.add_allocation_meta::<gst_video::VideoMeta>(None);
+            }
+            gst::PadProbeReturn::Ok
+        },
+    );
     let (tx, rx) = mpsc::channel();
     sink.connect("handoff", false, move |args| {
         let buffer = args[1].get::<gst::Buffer>().ok()?;
-        let map = buffer.map_readable().ok()?;
-        let _ = tx.send(map.as_slice().to_vec());
+        let caps = args[2].get::<gst::Pad>().ok()?.current_caps()?;
+        let data = buffer
+            .map_readable()
+            .map(|m| m.as_slice().to_vec())
+            .unwrap_or_default();
+        let _ = tx.send((data, caps));
         None
     });
-    let spec = PreviewSpec {
-        aspect: (1, 1),
-        width: size,
-        height: size,
-        mirror: true,
-        mask: circle_mask(size),
-    };
-    build_preview_chain(&pipeline, source, sink, spec).expect("preview chain links");
+    build_preview_chain(&pipeline, source, sink, output).expect("preview chain links");
     pipeline.set_state(gst::State::Playing).expect("play");
     let frame = rx
         .recv_timeout(Duration::from_secs(10))
@@ -545,20 +603,44 @@ fn first_preview_frame(source: gst::Element, size: u32) -> Vec<u8> {
     frame
 }
 
-fn assert_round_bgra(frame: &[u8], size: u32) {
-    assert_eq!(frame.len(), (size * size * 4) as usize);
-    let pixel = |x: u32, y: u32| &frame[((y * size + x) * 4) as usize..][..4];
-    assert_eq!(pixel(0, 0), &[0, 0, 0, 0], "corner is fully transparent");
-    assert_eq!(pixel(size / 2, size / 2)[3], 255, "centre is opaque");
-}
-
+/// The CPU path hands GTK BGRx at the camera's own size: no scaling or
+/// masking on the CPU any more (GTK crops and clips on the GPU).
 #[test]
-fn bubble_preview_frames_are_round() {
+fn bubble_preview_cpu_path_is_unscaled_bgrx() {
     if !gst_ready() {
         return;
     }
-    let frame = first_preview_frame(solid(0xff00ff00), 64);
-    assert_round_bgra(&frame, 64);
+    let source = solid(0xff00ff00);
+    source.set_property("is-live", true);
+    let (frame, caps) = first_preview_frame(source, &PreviewOutput::SystemBgrx);
+    let info = gst_video::VideoInfo::from_caps(&caps).expect("raw caps");
+    assert_eq!(info.format(), gst_video::VideoFormat::Bgrx);
+    // videotestsrc's default size, untouched.
+    assert_eq!((info.width(), info.height()), (320, 240));
+    let stride = info.stride()[0] as usize;
+    let centre = &frame[120 * stride + 160 * 4..][..3];
+    assert_eq!(centre, &[0, 255, 0], "solid green in BGRx");
+}
+
+/// The GPU path negotiates a DMA-BUF from vapostproc (skipped without
+/// VA-API).
+#[test]
+fn bubble_preview_gpu_path_negotiates_dmabuf() {
+    if !gst_ready() {
+        return;
+    }
+    let Some((drm_format, ..)) = va_rgb_dmabuf_formats().into_iter().next() else {
+        eprintln!("skipping: no VA-API RGB DMA-BUF output");
+        return;
+    };
+    let (_, caps) = first_preview_frame(
+        solid(0xff00ff00),
+        &PreviewOutput::Dmabuf(drm_format.clone()),
+    );
+    let features = caps.features(0).expect("features");
+    assert!(features.contains("memory:DMABuf"), "caps: {caps}");
+    let s = caps.structure(0).expect("structure");
+    assert_eq!(s.get::<String>("drm-format").ok(), Some(drm_format));
 }
 
 /// The preview chain with the real camera (pipewiresrc advertises ANY caps,
@@ -572,8 +654,8 @@ fn real_camera_preview() {
     let source = gst::ElementFactory::make("pipewiresrc")
         .build()
         .expect("pipewiresrc");
-    let frame = first_preview_frame(source, 200);
-    assert_round_bgra(&frame, 200);
+    let (_, caps) = first_preview_frame(source, &PreviewOutput::SystemBgrx);
+    assert!(caps.to_string().contains("BGRx"), "caps: {caps}");
 }
 
 /// Pause for 1.5 s in the middle of a recording: the file must contain only
@@ -601,6 +683,7 @@ fn pause_leaves_no_gap_and_stop_while_paused_finalizes() {
                 fps: 30,
                 bits_per_pixel: 0.08,
                 encoder: EncoderKind::detect(EncoderPreference::Auto).expect("H.264 encoder"),
+                max_height: None,
             };
             let main_loop = glib::MainLoop::new(Some(&context), false);
             let finalized = Rc::new(RefCell::new(false));

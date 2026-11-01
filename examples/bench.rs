@@ -18,6 +18,7 @@ use reelix::config::{EncoderPreference, Quality};
 use reelix::recording::audio::{AacEncoderKind, AudioInput, AudioSourceElement};
 use reelix::recording::camera::{CameraInput, CameraLayout, CameraSource, Corner, Shape};
 use reelix::recording::encoder::target_bitrate;
+use reelix::recording::pipeline::output_size;
 use reelix::recording::{
     AudioConfig, EncoderKind, PipelineConfig, PipelineEvent, RecordingPipeline, VideoInput,
 };
@@ -67,6 +68,9 @@ struct Args {
     content: Content,
     #[arg(long, default_value_t = 30)]
     fps: u32,
+    /// Downscale the 1080p source to this height (e.g. 720).
+    #[arg(long)]
+    max_height: Option<u32>,
 }
 
 /// A live test source with fixed caps, wrapped in a bin with one src pad.
@@ -191,6 +195,7 @@ fn main() {
         fps: args.fps,
         bits_per_pixel: quality.bits_per_pixel(),
         encoder,
+        max_height: args.max_height,
     };
 
     let main_loop = glib::MainLoop::new(None, false);
@@ -235,14 +240,15 @@ fn main() {
 
     let size = std::fs::metadata(&output).map(|m| m.len()).unwrap_or(0);
     let bitrate = size as f64 * 8.0 / args.seconds as f64 / 1e6;
+    let (out_w, out_h) = output_size(1920, 1080, args.max_height);
     let target = f64::from(target_bitrate(
-        1920,
-        1080,
+        out_w,
+        out_h,
         args.fps,
         quality.bits_per_pixel(),
     )) / 1e6;
     println!(
-        "encoder={encoder} camera={:?} audio={} quality={:?} content={:?} fps={}",
+        "encoder={encoder} camera={:?} audio={} quality={:?} content={:?} fps={} output={out_w}x{out_h}",
         args.camera, args.audio, args.quality, args.content, args.fps
     );
     println!(

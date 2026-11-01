@@ -1,6 +1,7 @@
 //! GTK4/libadwaita front end.
 
 mod audio_panel;
+mod bubble_video;
 mod camera_bubble;
 mod camera_panel;
 mod library;

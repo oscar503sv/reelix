@@ -41,8 +41,11 @@ Tests:
   compone una "cámara" verde sobre una "pantalla" roja y comprueba píxel a
   píxel posición, tamaño y máscara circular.
 - La cadena de vista previa de la burbuja (`build_preview_chain`) se prueba
-  con `videotestsrc` y comprueba que los frames salen redondos (esquinas con
-  alfa 0, centro opaco).
+  con `videotestsrc`: por CPU entrega BGRx sin escalar; por GPU negocia un
+  DMA-BUF de `vapostproc` (se omite sin VA-API). El dibujo (recorte, espejo,
+  borde) son funciones puras con tests en `ui::bubble_video`.
+- `max_height_downscales_the_recording` graba con resolución máxima y
+  comprueba el tamaño del MP4.
 - Con cámara real (no corre en CI): `cargo test -- --ignored real_camera`
   (composición y vista previa).
 
