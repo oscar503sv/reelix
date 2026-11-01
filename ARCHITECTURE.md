@@ -286,11 +286,11 @@ Lecciones de la prueba real, cada una con su test:
 
 ## UX (Fase 4)
 
-**Pausa.** `PAUSED` en un pipeline en vivo detiene las fuentes y el tiempo de
-ejecución; al volver a `PLAYING` continúa donde se quedó, así que el MP4 no
-tiene huecos y audio/vídeo siguen alineados (test con dos pausas: archivo de
-2,0 s para 2,0 s grabados). En `PAUSED` el sink espera datos y retendría el
-EOS: detener estando en pausa reanuda primero.
+**Pausa.** Sin huecos en el MP4 y con audio/vídeo alineados (test con dos
+pausas: archivo de 2,0 s para 2,0 s grabados). Al principio se usaba el
+estado `PAUSED` del pipeline; desde la Fase 7 las fuentes siguen corriendo y
+una compuerta descarta los datos y desplaza los timestamps (ver
+«Empaquetado»), porque `pipewiresrc` del runtime Flatpak no reanudaba.
 
 **Cuenta atrás.** El pipeline se construye antes (los errores salen antes de
 contar) pero solo arranca al llegar a cero. El número se oculta y la captura
@@ -381,6 +381,28 @@ codificador tarda la mitad por frame (13 → 7 ms) y la RAM baja ~20 MB.
 
 App real tras la Fase 6 (pantalla completa + burbuja + micrófono, 29 s):
 CPU 5–8 % en reposo con burbuja y 11–14 % grabando; 0 frames descartados.
+
+## Empaquetado (Fase 7)
+
+- **RPM**: `packaging/rpm/reelix.spec` con los macros de Fedora
+  (`cargo-rpm-macros`) y crates vendorizados; `%check` corre la suite de tests.
+- **Flatpak**: `packaging/flatpak/io.github.oscar503sv.Reelix.yml`, runtime
+  GNOME 50. Permisos mínimos: `wayland`, `fallback-x11`, `ipc`, `dri`,
+  `pulseaudio` y `xdg-videos`. Pantalla y cámara llegan por portales.
+- Dentro de Flatpak no se llama a `register_host_app` (es solo para apps sin
+  sandbox; el portal identifica a la app por su sandbox).
+
+**Pausa sin cambiar de estado.** En la primera prueba del Flatpak, reanudar
+falló (PAUSED → PLAYING), y la app se colgó al desmontar el pipeline. El
+test con fuentes sintéticas pasaba en el mismo runtime, y `pulsesrc` solo
+también, así que la sospecha recae en `pipewiresrc` de ese runtime
+(PipeWire 1.6.8). La pausa ya no toca el estado del pipeline: las fuentes
+siguen vivas, una compuerta (`PauseGate`) delante de cada cola de
+codificación descarta los datos mientras dura la pausa y, al reanudar,
+resta el tiempo pausado a los timestamps. Resultado igual (sin hueco, A/V
+alineados, detener en pausa finaliza) y sin depender de cómo cada fuente
+viva maneje los cambios de estado. El tiempo transcurrido se calcula igual
+(running time − tiempo pausado).
 
 ## Investigación de plataforma (Fedora 44, GNOME 50, Intel Tiger Lake)
 

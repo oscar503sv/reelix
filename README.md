@@ -95,6 +95,29 @@ Reelix detecta el encoder en tiempo de ejecución; no hay que recompilar.
 
 ## Instalación y ejecución
 
+### Flatpak
+
+```bash
+flatpak install --user ./reelix.flatpak   # desde la release de GitHub
+flatpak run io.github.oscar503sv.Reelix
+```
+
+Necesita Flathub configurado (el runtime GNOME 50 se descarga solo). Para
+construirlo: `packaging/flatpak/build-flatpak.sh` (ver
+[DEVELOPMENT.md](DEVELOPMENT.md#empaquetado)). Permisos: Wayland, GPU, audio
+y la carpeta Vídeos; la pantalla y la cámara pasan por los portales.
+
+### RPM (Fedora)
+
+```bash
+sudo dnf install ./reelix-0.7.0-1.fc44.x86_64.rpm
+```
+
+No instales a la vez el RPM y el Flatpak: comparten ID y GNOME mostraría
+solo uno de los dos.
+
+### Desde el código
+
 ```bash
 git clone https://github.com/oscar503sv/reelix && cd reelix
 cargo build --release
@@ -209,7 +232,8 @@ Detalles y decisiones en [ARCHITECTURE.md](ARCHITECTURE.md).
 - [x] **Fase 4**: burbuja/overlay, pausa, cuenta atrás, biblioteca, preferencias, atajos globales (pendientes de verificar en uso real).
 - [x] **Fase 5**: medición (estadísticas, benchmark) y optimización: sin relleno en los MP4, codificación y conversión de color en la GPU.
 - [x] **Fase 6**: bajo consumo: burbuja en la GPU (19 % → 6 % de CPU) y resolución máxima configurable.
-- [ ] Empaquetado RPM y Flatpak.
+- [x] **Fase 7**: empaquetado RPM y Flatpak, ícono definitivo.
+- [ ] Publicar: capturas para AppStream, release en GitHub, Flathub y COPR.
 
 ## Licencia
 

@@ -34,6 +34,7 @@
     <release version="0.7.0" date="2026-11-01">
       <description>
         <p>Low resource usage: the camera bubble is processed on the GPU (about a third of the CPU it used), and a maximum recording resolution setting.</p>
+        <p>New icon, RPM and Flatpak packages, and a more robust pause that works with every capture source.</p>
       </description>
     </release>
     <release version="0.6.0" date="2026-10-23">

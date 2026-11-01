@@ -92,8 +92,7 @@ grabación deja en el log `frames`, `dropped` y `avg_encode_ms`.
 cargo build --release
 install -Dm755 target/release/reelix ~/.local/bin/reelix
 install -Dm644 data/io.github.oscar503sv.Reelix.desktop ~/.local/share/applications/io.github.oscar503sv.Reelix.desktop
-install -Dm644 data/icons/hicolor/scalable/apps/io.github.oscar503sv.Reelix.svg ~/.local/share/icons/hicolor/scalable/apps/io.github.oscar503sv.Reelix.svg
-install -Dm644 data/icons/hicolor/symbolic/apps/io.github.oscar503sv.Reelix-symbolic.svg ~/.local/share/icons/hicolor/symbolic/apps/io.github.oscar503sv.Reelix-symbolic.svg
+cp -r data/icons ~/.local/share/
 update-desktop-database ~/.local/share/applications
 ```
 
@@ -103,6 +102,53 @@ Validar metadatos:
 desktop-file-validate data/*.desktop
 appstreamcli validate --no-net data/*.metainfo.xml
 ```
+
+## Empaquetado
+
+Ambos paquetes se construyen **sin red** durante la compilación: las
+dependencias de Rust van vendorizadas (RPM) o descritas en
+`packaging/flatpak/cargo-sources.json` (Flatpak).
+
+### RPM
+
+```bash
+sudo dnf install rpm-build rpmlint cargo-rpm-macros
+packaging/rpm/build-rpm.sh            # RPM binario + SRPM en ~/rpmbuild
+packaging/rpm/build-rpm.sh --srpm     # solo SRPM (para COPR o mock)
+rpmlint ~/rpmbuild/RPMS/x86_64/reelix-*.rpm packaging/rpm/reelix.spec
+```
+
+El script empaqueta **el último commit** (`git archive HEAD`) y crea
+`reelix-VERSION-vendor.tar.xz` con `cargo vendor`. `%check` valida el
+`.desktop` y el metainfo y corre los tests. El campo `License` incluye las
+licencias de los crates enlazados (`%cargo_license_summary` en el log).
+
+### Flatpak
+
+```bash
+sudo dnf install flatpak-builder
+flatpak install --user flathub org.gnome.Platform//50 org.gnome.Sdk//50 \
+    org.freedesktop.Sdk.Extension.rust-stable//25.08
+packaging/flatpak/build-flatpak.sh    # construye, instala (usuario) y crea target/flatpak/reelix.flatpak
+```
+
+Construye desde el árbol de trabajo (incluye cambios sin commit).
+`cargo-sources.py` regenera `cargo-sources.json` a partir de `Cargo.lock`
+(mismo formato que `flatpak-cargo-generator`). Para Flathub, cambia la fuente
+`dir` del manifiesto por la etiqueta `git` de la release.
+
+El runtime trae GStreamer 1.26 con VA-API (extensión Intel), x264
+(extensión codecs-extra), AAC de libav y `gtk4paintablesink`; Reelix detecta
+los elementos en ejecución.
+
+## Al publicar una versión
+
+1. Subir la versión en `Cargo.toml`, `packaging/rpm/reelix.spec` (Version y
+   `%changelog`) y añadir `<release>` en el metainfo.
+2. `cargo test`, commit y etiqueta `vX.Y.Z`.
+3. `packaging/rpm/build-rpm.sh` y `packaging/flatpak/build-flatpak.sh`;
+   adjuntar a la release de GitHub el `.rpm`, el `.flatpak` y el
+   `reelix-X.Y.Z-vendor.tar.xz`.
 
 ## Renombrar el proyecto
 

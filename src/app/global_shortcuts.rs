@@ -75,7 +75,11 @@ impl GlobalShortcutsSession {
         let app_id = branding::APP_ID
             .parse()
             .map_err(|e| AppError::Portal(format!("invalid app id: {e}")))?;
-        if let Err(e) = ashpd::register_host_app(app_id).await {
+        // Flatpak apps are identified by the sandbox; only host (RPM/cargo)
+        // installs need to tell the portal who they are.
+        if !std::path::Path::new("/.flatpak-info").exists()
+            && let Err(e) = ashpd::register_host_app(app_id).await
+        {
             // Older portals lack the Registry; binding may still work.
             tracing::warn!(error = %e, "could not register host app id");
         }

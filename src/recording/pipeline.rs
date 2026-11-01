@@ -98,7 +98,97 @@ pub struct RecordingPipeline {
     finishing: Arc<AtomicBool>,
     has_audio: bool,
     has_camera: bool,
+    pause: Arc<PauseGate>,
     _bus_watch: gst::bus::BusWatchGuard,
+}
+
+/// Pause without changing the pipeline state. Some live sources do not
+/// survive PLAYING → PAUSED → PLAYING (pipewiresrc in the GNOME 50 Flatpak
+/// runtime failed to resume), so the sources keep running and the gate,
+/// placed right before each encode queue, drops their data while paused.
+/// After resuming, timestamps are shifted back by the total paused time, so
+/// the file has no gap and audio and video stay aligned.
+#[derive(Default)]
+struct PauseGate {
+    paused: AtomicBool,
+    /// Total paused time so far (ns), subtracted from every timestamp.
+    offset_ns: std::sync::atomic::AtomicU64,
+    /// Running time when the current pause started.
+    paused_at: Mutex<Option<gst::ClockTime>>,
+}
+
+impl PauseGate {
+    /// Drops buffers while paused and shifts timestamps afterwards, on the
+    /// pad that feeds an encode queue.
+    fn install(self: &Arc<Self>, queue: &gst::Element) -> Result<()> {
+        let pad = queue
+            .static_pad("sink")
+            .and_then(|sink| sink.peer())
+            .ok_or_else(|| AppError::Pipeline("pause gate: queue is not linked".into()))?;
+        let gate = Arc::clone(self);
+        pad.add_probe(
+            gst::PadProbeType::BUFFER | gst::PadProbeType::BUFFER_LIST,
+            move |_, info| {
+                if gate.paused.load(Ordering::SeqCst) {
+                    return gst::PadProbeReturn::Drop;
+                }
+                let offset = gate.offset_ns.load(Ordering::SeqCst);
+                if offset == 0 {
+                    return gst::PadProbeReturn::Ok;
+                }
+                let shift = |buffer: &mut gst::BufferRef| {
+                    let back = |t: Option<gst::ClockTime>| {
+                        t.map(|t| {
+                            gst::ClockTime::from_nseconds(t.nseconds().saturating_sub(offset))
+                        })
+                    };
+                    buffer.set_pts(back(buffer.pts()));
+                    buffer.set_dts(back(buffer.dts()));
+                };
+                match info.data.as_mut() {
+                    Some(gst::PadProbeData::Buffer(buffer)) => shift(buffer.make_mut()),
+                    Some(gst::PadProbeData::BufferList(list)) => {
+                        list.make_mut().foreach_mut(|mut buffer, _| {
+                            shift(buffer.make_mut());
+                            std::ops::ControlFlow::Continue(Some(buffer))
+                        });
+                    }
+                    _ => {}
+                }
+                gst::PadProbeReturn::Ok
+            },
+        )
+        .ok_or_else(|| AppError::Pipeline("pause gate: probe failed".into()))?;
+        Ok(())
+    }
+
+    fn pause(&self, now: gst::ClockTime) {
+        if let Ok(mut paused_at) = self.paused_at.lock()
+            && paused_at.is_none()
+        {
+            *paused_at = Some(now);
+            self.paused.store(true, Ordering::SeqCst);
+        }
+    }
+
+    fn resume(&self, now: gst::ClockTime) {
+        if let Ok(mut paused_at) = self.paused_at.lock()
+            && let Some(start) = paused_at.take()
+        {
+            let paused = now.nseconds().saturating_sub(start.nseconds());
+            self.offset_ns.fetch_add(paused, Ordering::SeqCst);
+            self.paused.store(false, Ordering::SeqCst);
+        }
+    }
+
+    /// Recorded time at running time `now` (frozen while paused).
+    fn recorded(&self, now: gst::ClockTime) -> Duration {
+        let end = self.paused_at.lock().ok().and_then(|p| *p).unwrap_or(now);
+        Duration::from_nanos(
+            end.nseconds()
+                .saturating_sub(self.offset_ns.load(Ordering::SeqCst)),
+        )
+    }
 }
 
 impl RecordingPipeline {
@@ -215,6 +305,12 @@ impl RecordingPipeline {
         let stats = Arc::new(PipelineStats::default());
         stats.attach(&queue, &encoder)?;
 
+        let pause = Arc::new(PauseGate::default());
+        pause.install(&queue)?;
+        if has_audio && let Some(audio_queue) = pipeline.by_name(audio::AUDIO_QUEUE_NAME) {
+            pause.install(&audio_queue)?;
+        }
+
         let resolution = Arc::new(Mutex::new(None));
         install_size_lock(
             &source,
@@ -249,6 +345,7 @@ impl RecordingPipeline {
             finishing,
             has_audio,
             has_camera: composition.is_some(),
+            pause,
             _bus_watch: bus_watch,
         })
     }
@@ -283,32 +380,29 @@ impl RecordingPipeline {
     /// Pauses capture. Live sources stop and the pipeline's running time
     /// stops with them, so the file has no gap when recording resumes.
     pub fn pause(&self) -> Result<()> {
-        self.set_state(gst::State::Paused, "pause")
+        let now = self.running_time()?;
+        self.pause.pause(now);
+        tracing::info!(at = %now, "recording paused");
+        Ok(())
     }
 
     pub fn resume(&self) -> Result<()> {
-        self.set_state(gst::State::Playing, "resume")
+        let now = self.running_time()?;
+        self.pause.resume(now);
+        tracing::info!(at = %now, "recording resumed");
+        Ok(())
     }
 
-    fn set_state(&self, state: gst::State, action: &str) -> Result<()> {
-        match self.pipeline.set_state(state) {
-            Ok(_) => {
-                tracing::info!(?state, "recording {action}d");
-                Ok(())
-            }
-            Err(_) => Err(self
-                .pending_error()
-                .unwrap_or_else(|| AppError::Pipeline(format!("failed to {action} recording")))),
-        }
+    fn running_time(&self) -> Result<gst::ClockTime> {
+        self.pipeline
+            .current_running_time()
+            .ok_or_else(|| AppError::Pipeline("pipeline has no running time".into()))
     }
 
     /// Requests a clean stop. The file is complete once
     /// [`PipelineEvent::Finalized`] is delivered.
     pub fn finish(&self) {
-        // A paused sink waits for data and would hold the EOS back.
-        if self.pipeline.current_state() == gst::State::Paused {
-            let _ = self.pipeline.set_state(gst::State::Playing);
-        }
+        // Works while paused too: EOS goes into the queues, past the gate.
         request_finish(&self.pipeline, &self.finishing);
     }
 
@@ -337,11 +431,11 @@ impl RecordingPipeline {
         self.resolution.lock().ok().and_then(|r| *r)
     }
 
-    /// Current recording position (running time of the pipeline).
+    /// Recorded time so far: running time minus the paused time.
     pub fn position(&self) -> Option<Duration> {
         self.pipeline
-            .query_position::<gst::ClockTime>()
-            .map(|t| Duration::from_nanos(t.nseconds()))
+            .current_running_time()
+            .map(|now| self.pause.recorded(now))
     }
 }
 
@@ -592,7 +686,27 @@ fn install_bus_watch(
 
 #[cfg(test)]
 mod tests {
-    use super::output_size;
+    use super::{PauseGate, output_size};
+
+    #[test]
+    fn pause_gate_accumulates_paused_time() {
+        let t = gst::ClockTime::from_seconds;
+        let gate = PauseGate::default();
+        assert_eq!(gate.recorded(t(3)).as_secs(), 3);
+        gate.pause(t(3));
+        gate.pause(t(4)); // a second pause request is ignored
+        assert_eq!(gate.recorded(t(10)).as_secs(), 3, "frozen while paused");
+        gate.resume(t(5));
+        assert_eq!(gate.recorded(t(7)).as_secs(), 5);
+        gate.resume(t(8)); // resuming twice changes nothing
+        gate.pause(t(8));
+        gate.resume(t(9));
+        assert_eq!(gate.recorded(t(10)).as_secs(), 7);
+        assert_eq!(
+            gate.offset_ns.load(std::sync::atomic::Ordering::SeqCst),
+            3_000_000_000
+        );
+    }
 
     #[test]
     fn output_size_keeps_small_captures() {

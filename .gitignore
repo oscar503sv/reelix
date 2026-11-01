@@ -1,1 +1,7 @@
 /target
+# Private working notes and source artwork (not published).
+/docs/
+# Packaging output
+/.flatpak-builder/
+*.flatpak
+*.rpm
